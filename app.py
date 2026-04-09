@@ -22,8 +22,9 @@ import streamlit as st
 ROOT_DIR = Path(__file__).parent.resolve()
 sys.path.insert(0, str(ROOT_DIR / "src"))
 
-from dotenv import load_dotenv
-load_dotenv(ROOT_DIR / ".env")
+from runtime_config import configure_environment
+
+configure_environment(ROOT_DIR)
 
 OUTPUT_DIR = ROOT_DIR / "output"
 

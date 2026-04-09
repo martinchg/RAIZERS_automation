@@ -64,4 +64,8 @@ PAPPERS_API_KEY=
 ```
 
 Configurer dans un fichier `.env` à la racine (non versionné).
+
+En déploiement sur Streamlit Community Cloud, ajoute ces mêmes clés dans `st.secrets` :
+le code injecte automatiquement les secrets Streamlit dans `os.environ`, tandis qu'en local
+le fichier `.env` continue d'être utilisé.
   

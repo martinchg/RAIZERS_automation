@@ -9,4 +9,5 @@ config/
 logs/
 *.pyc
 .DS_Store
+.streamlit/secrets.toml
 ~$*

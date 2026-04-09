@@ -25,10 +25,10 @@ _SRC_DIR = Path(__file__).parent.resolve()
 if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
-from dotenv import load_dotenv
-
 ROOT_DIR = _SRC_DIR.parent.resolve()
-load_dotenv(ROOT_DIR / ".env")
+from runtime_config import configure_environment
+
+configure_environment(ROOT_DIR)
 
 from tqdm import tqdm
 

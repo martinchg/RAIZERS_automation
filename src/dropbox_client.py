@@ -11,12 +11,12 @@ import os
 from pathlib import Path
 from typing import List, Optional
 
-from dotenv import load_dotenv
 import dropbox
 from dropbox.files import FileMetadata, FolderMetadata
+from runtime_config import configure_environment
 
-# Charge le .env automatiquement
-load_dotenv(Path(__file__).parent / ".env")
+ROOT_DIR = Path(__file__).parent.parent.resolve()
+configure_environment(ROOT_DIR)
 
 logger = logging.getLogger(__name__)
 

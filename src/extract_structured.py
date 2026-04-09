@@ -23,11 +23,11 @@ _SRC_DIR = Path(__file__).parent.resolve()
 if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
-from dotenv import load_dotenv
 from excel_filler import fill_excel_template
+from runtime_config import configure_environment
 
 ROOT_DIR = _SRC_DIR.parent.resolve()
-load_dotenv(ROOT_DIR / ".env")
+configure_environment(ROOT_DIR)
 
 logger = logging.getLogger(__name__)
 
