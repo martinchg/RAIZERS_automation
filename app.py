@@ -27,6 +27,7 @@ from runtime_config import configure_environment
 configure_environment(ROOT_DIR)
 
 OUTPUT_DIR = ROOT_DIR / "output"
+LOGO_PATH = ROOT_DIR / "assets" / "raizers_logo.svg"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -315,12 +316,9 @@ if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
 if not st.session_state.authenticated:
-    st.markdown("""
-    <div class="main-header">
-        <h1>RAI<span class="accent">Z</span>ERS</h1>
-        <p>The Investment Circle</p>
-    </div>
-    """, unsafe_allow_html=True)
+    logo_left, logo_center, logo_right = st.columns([1, 5, 1])
+    with logo_center:
+        st.image(str(LOGO_PATH), use_container_width=True)
 
     col_left, col_center, col_right = st.columns([1, 2, 1])
     with col_center:
