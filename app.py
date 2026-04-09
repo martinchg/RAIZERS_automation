@@ -27,7 +27,7 @@ from runtime_config import configure_environment
 configure_environment(ROOT_DIR)
 
 OUTPUT_DIR = ROOT_DIR / "output"
-LOGO_PATH = ROOT_DIR / "assets" / "raizers_logo.svg"
+LOGO_PATH = ROOT_DIR / "assets" / "raizers_logo.png"
 
 # ---------------------------------------------------------------------------
 # Helpers
