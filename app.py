@@ -229,12 +229,12 @@ st.markdown("""
 <style>
     /* Global */
     .stApp {
-        background: #6ea9dc;
+        background: #1d6db3;
     }
 
     /* Header bar */
     .main-header {
-        background: linear-gradient(135deg, #6ea9dc 0%, #1B2D45 55%, #4DC8E8 150%);
+        background: linear-gradient(135deg, #1d6db3 0%, #1B2D45 55%, #4DC8E8 150%);
         border-bottom: 3px solid #4DC8E8;
         padding: 2.5rem 2rem 2rem;
         margin: -1rem -1rem 2rem -1rem;
