@@ -229,12 +229,12 @@ st.markdown("""
 <style>
     /* Global */
     .stApp {
-        background: #93c7f5;
+        background: #6ea9dc;
     }
 
     /* Header bar */
     .main-header {
-        background: linear-gradient(135deg, #93c7f5 0%, #1B2D45 55%, #4DC8E8 150%);
+        background: linear-gradient(135deg, #6ea9dc 0%, #1B2D45 55%, #4DC8E8 150%);
         border-bottom: 3px solid #4DC8E8;
         padding: 2.5rem 2rem 2rem;
         margin: -1rem -1rem 2rem -1rem;
@@ -339,13 +339,14 @@ st.markdown("""
 
     /* Login page */
     .login-container {
-        max-width: 380px;
-        margin: 4rem auto;
+        max-width: 520px;
+        margin: 2rem auto 0 auto;
         background: #1B2D45;
         border: 1px solid rgba(77,200,232,0.2);
         border-radius: 16px;
         padding: 2.5rem 2rem;
         text-align: center;
+        box-shadow: 0 18px 45px rgba(13,27,42,0.18);
     }
     .login-container h2 {
         color: #FFFFFF;
@@ -396,8 +397,9 @@ if not st.session_state.authenticated:
     with logo_center:
         st.image(str(LOGO_PATH), use_container_width=True)
 
-    col_left, col_center, col_right = st.columns([1, 2, 1])
+    col_left, col_center, col_right = st.columns([1.2, 2.6, 1.2])
     with col_center:
+        st.markdown('<div class="login-container">', unsafe_allow_html=True)
         st.markdown("#### Connexion")
         if not auth_user or not auth_pass:
             st.error(
@@ -418,6 +420,7 @@ if not st.session_state.authenticated:
                     '<div class="login-error">Identifiant ou mot de passe incorrect.</div>',
                     unsafe_allow_html=True,
                 )
+        st.markdown('</div>', unsafe_allow_html=True)
     st.stop()
 
 # --- Header ---
