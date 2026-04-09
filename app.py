@@ -166,12 +166,12 @@ st.markdown("""
 <style>
     /* Global */
     .stApp {
-        background: #0D1B2A;
+        background: #1e79c8;
     }
 
     /* Header bar */
     .main-header {
-        background: linear-gradient(135deg, #0D1B2A 0%, #1B2D45 50%, #4DC8E8 150%);
+        background: linear-gradient(135deg, #1e79c8 0%, #1B2D45 55%, #4DC8E8 150%);
         border-bottom: 3px solid #4DC8E8;
         padding: 2.5rem 2rem 2rem;
         margin: -1rem -1rem 2rem -1rem;
@@ -303,6 +303,9 @@ st.markdown("""
         margin-top: 0.5rem;
         font-size: 0.9rem;
     }
+    .top-logo {
+        margin: -0.25rem 0 1.5rem 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -338,9 +341,14 @@ if not st.session_state.authenticated:
     st.stop()
 
 # --- Header ---
+st.markdown('<div class="top-logo">', unsafe_allow_html=True)
+logo_left, logo_center, logo_right = st.columns([1, 5, 1])
+with logo_center:
+    st.image(str(LOGO_PATH), use_container_width=True)
+st.markdown('</div>', unsafe_allow_html=True)
+
 st.markdown("""
 <div class="main-header">
-    <h1>RAI<span class="accent">Z</span>ERS</h1>
     <p>Audit automatique</p>
 </div>
 """, unsafe_allow_html=True)
