@@ -166,12 +166,12 @@ st.markdown("""
 <style>
     /* Global */
     .stApp {
-        background: #1e79c8;
+        background: #93c7f5;
     }
 
     /* Header bar */
     .main-header {
-        background: linear-gradient(135deg, #1e79c8 0%, #1B2D45 55%, #4DC8E8 150%);
+        background: linear-gradient(135deg, #93c7f5 0%, #1B2D45 55%, #4DC8E8 150%);
         border-bottom: 3px solid #4DC8E8;
         padding: 2.5rem 2rem 2rem;
         margin: -1rem -1rem 2rem -1rem;
@@ -349,7 +349,6 @@ st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown("""
 <div class="main-header">
-    <p>Audit automatique</p>
 </div>
 """, unsafe_allow_html=True)
 
