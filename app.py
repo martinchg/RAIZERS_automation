@@ -160,11 +160,199 @@ class StreamlitLogHandler(logging.Handler):
 
 st.set_page_config(page_title="RAIZERS Audit", page_icon="📊", layout="centered")
 
-st.title("RAIZERS — Audit automatique")
-st.markdown("---")
+# --- Custom CSS ---
+st.markdown("""
+<style>
+    /* Global */
+    .stApp {
+        background: #0D1B2A;
+    }
 
-# --- Sélection du dossier (navigateur Dropbox) ---
-st.subheader("1. Dossier à auditer")
+    /* Header bar */
+    .main-header {
+        background: linear-gradient(135deg, #0D1B2A 0%, #1B2D45 50%, #4DC8E8 150%);
+        border-bottom: 3px solid #4DC8E8;
+        padding: 2.5rem 2rem 2rem;
+        margin: -1rem -1rem 2rem -1rem;
+        text-align: center;
+    }
+    .main-header h1 {
+        color: #FFFFFF !important;
+        font-size: 2.4rem !important;
+        font-weight: 700 !important;
+        margin: 0 !important;
+        letter-spacing: 2px;
+    }
+    .main-header .accent {
+        color: #4DC8E8;
+    }
+    .main-header p {
+        color: rgba(255,255,255,0.6);
+        font-size: 0.95rem;
+        margin: 0.5rem 0 0 0;
+        letter-spacing: 3px;
+        text-transform: uppercase;
+    }
+
+    /* Cards */
+    .step-card {
+        background: #1B2D45;
+        border: 1px solid rgba(77,200,232,0.15);
+        border-radius: 12px;
+        padding: 1.2rem 1.5rem;
+        margin-bottom: 0.8rem;
+    }
+    .step-card h3 {
+        font-size: 1rem;
+        color: #FFFFFF;
+        margin: 0;
+        font-weight: 600;
+    }
+    .step-number {
+        display: inline-block;
+        background: #4DC8E8;
+        color: #0D1B2A;
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        text-align: center;
+        line-height: 26px;
+        font-size: 0.8rem;
+        font-weight: 700;
+        margin-right: 8px;
+        vertical-align: middle;
+    }
+
+    /* Result badges */
+    .result-ok {
+        background: rgba(39,174,96,0.12);
+        border-left: 4px solid #27AE60;
+        color: #A8F0C8;
+        padding: 0.6rem 1rem;
+        border-radius: 0 8px 8px 0;
+        margin: 0.4rem 0;
+    }
+    .result-err {
+        background: rgba(231,76,60,0.12);
+        border-left: 4px solid #E74C3C;
+        color: #F5B7B1;
+        padding: 0.6rem 1rem;
+        border-radius: 0 8px 8px 0;
+        margin: 0.4rem 0;
+    }
+
+    /* Hide default streamlit header/footer */
+    #MainMenu {visibility: hidden;}
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+
+    /* Button styling */
+    .stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, #4DC8E8 0%, #2A9FBF 100%);
+        color: #0D1B2A !important;
+        border: none;
+        border-radius: 10px;
+        padding: 0.7rem 1.5rem;
+        font-weight: 700;
+        font-size: 1rem;
+        letter-spacing: 0.3px;
+        transition: transform 0.15s, box-shadow 0.15s;
+    }
+    .stButton > button[kind="primary"]:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 16px rgba(77,200,232,0.35);
+    }
+
+    /* Selectbox & inputs */
+    .stSelectbox > div > div {
+        border-radius: 10px;
+        background: #1B2D45;
+    }
+    .stTextInput > div > div > input {
+        background: #1B2D45;
+        border-radius: 10px;
+    }
+
+    /* Login page */
+    .login-container {
+        max-width: 380px;
+        margin: 4rem auto;
+        background: #1B2D45;
+        border: 1px solid rgba(77,200,232,0.2);
+        border-radius: 16px;
+        padding: 2.5rem 2rem;
+        text-align: center;
+    }
+    .login-container h2 {
+        color: #FFFFFF;
+        font-size: 1.6rem;
+        margin-bottom: 0.3rem;
+    }
+    .login-container .subtitle {
+        color: rgba(255,255,255,0.5);
+        font-size: 0.85rem;
+        margin-bottom: 1.5rem;
+    }
+    .login-error {
+        background: rgba(231,76,60,0.15);
+        border: 1px solid rgba(231,76,60,0.3);
+        color: #F5B7B1;
+        padding: 0.6rem 1rem;
+        border-radius: 8px;
+        margin-top: 0.5rem;
+        font-size: 0.9rem;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# ---------------------------------------------------------------------------
+# Login
+# ---------------------------------------------------------------------------
+AUTH_USER = "admin123"
+AUTH_PASS = "raizers_crowdfunding"
+
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    st.markdown("""
+    <div class="main-header">
+        <h1>RAI<span class="accent">Z</span>ERS</h1>
+        <p>The Investment Circle</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col_left, col_center, col_right = st.columns([1, 2, 1])
+    with col_center:
+        st.markdown("#### Connexion")
+        username = st.text_input("Identifiant", placeholder="Identifiant")
+        password = st.text_input("Mot de passe", type="password", placeholder="Mot de passe")
+
+        if st.button("Se connecter", type="primary", use_container_width=True):
+            if username == AUTH_USER and password == AUTH_PASS:
+                st.session_state.authenticated = True
+                st.rerun()
+            else:
+                st.markdown(
+                    '<div class="login-error">Identifiant ou mot de passe incorrect.</div>',
+                    unsafe_allow_html=True,
+                )
+    st.stop()
+
+# --- Header ---
+st.markdown("""
+<div class="main-header">
+    <h1>RAI<span class="accent">Z</span>ERS</h1>
+    <p>Audit automatique</p>
+</div>
+""", unsafe_allow_html=True)
+
+# --- Step 1 : Dossier ---
+st.markdown("""
+<div class="step-card">
+    <h3><span class="step-number">1</span> Dossier a auditer</h3>
+</div>
+""", unsafe_allow_html=True)
 
 if "dbx_root" not in st.session_state:
     with st.spinner("Connexion Dropbox..."):
@@ -173,11 +361,8 @@ if "dbx_root" not in st.session_state:
 DROPBOX_ROOT = st.session_state.dbx_root
 
 if not DROPBOX_ROOT:
-    st.error("Impossible de trouver un dossier 'En audit' dans votre Dropbox. "
-             "Vérifiez la connexion et la structure de votre Dropbox.")
+    st.error("Impossible de trouver un dossier 'En audit' dans votre Dropbox.")
     st.stop()
-
-st.caption(f"Racine détectée : `{DROPBOX_ROOT}`")
 
 if "dbx_folders" not in st.session_state:
     st.session_state.dbx_folders = []
@@ -189,16 +374,11 @@ def _load_projects():
 if not st.session_state.dbx_folders:
     _load_projects()
 
-col1, col2 = st.columns([4, 1])
-with col2:
-    if st.button("Rafraichir"):
-        _load_projects()
-        st.rerun()
-
+col1, col2 = st.columns([5, 1])
 if st.session_state.dbx_folders:
     with col1:
         selected_project = st.selectbox(
-            "Projet à auditer",
+            "Projet",
             st.session_state.dbx_folders,
             label_visibility="collapsed",
         )
@@ -206,24 +386,32 @@ if st.session_state.dbx_folders:
 else:
     st.warning("Aucun dossier trouvé dans Dropbox.")
     selected_path = ""
+with col2:
+    if st.button("🔄", help="Rafraichir la liste"):
+        _load_projects()
+        st.rerun()
 
-# --- Options ---
-st.subheader("2. Options")
+# --- Step 2 : Options ---
+st.markdown("""
+<div class="step-card">
+    <h3><span class="step-number">2</span> Options</h3>
+</div>
+""", unsafe_allow_html=True)
 
 col_a, col_b = st.columns(2)
 with col_a:
-    run_extract = st.checkbox("Extraction LLM", value=True)
-    run_mandats = st.checkbox("Mandats Pappers", value=True)
+    run_extract = st.toggle("Extraction LLM", value=True)
+    run_mandats = st.toggle("Mandats Pappers", value=True)
 with col_b:
-    run_fill = st.checkbox("Générer Excel", value=True)
-    send_email = st.checkbox("Envoyer par email", value=False)
+    run_fill = st.toggle("Generer Excel", value=True)
+    send_email = st.toggle("Envoyer par email", value=False)
 
 email_to = ""
 if send_email:
     email_to = st.text_input("Email de notification", placeholder="prenom@raizers.com")
 
 # --- Lancement ---
-st.markdown("---")
+st.markdown("<br>", unsafe_allow_html=True)
 
 if st.button("Lancer l'audit", type="primary", use_container_width=True):
     if not selected_path:
@@ -379,31 +567,38 @@ if st.button("Lancer l'audit", type="primary", use_container_width=True):
         expanded=False,
     )
 
-    st.markdown("---")
-    st.subheader("Résultat")
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    step_labels = {
+        "pipeline": ("📂", "Pipeline"),
+        "extract": ("🤖", "Extraction"),
+        "mandats": ("🏢", "Mandats"),
+        "fill": ("📊", "Excel"),
+        "email": ("📧", "Email"),
+    }
 
     for step, result in results_summary.items():
-        icon = "✅" if "ERREUR" not in str(result) and "SKIP" not in str(result) else "❌"
-        step_labels = {
-            "pipeline": "Pipeline",
-            "extract": "Extraction",
-            "mandats": "Mandats",
-            "fill": "Excel",
-            "email": "Email",
-        }
-        st.write(f"{icon} **{step_labels.get(step, step)}** : {result}")
+        is_ok = "ERREUR" not in str(result) and "SKIP" not in str(result)
+        icon, label = step_labels.get(step, ("", step))
+        css_class = "result-ok" if is_ok else "result-err"
+        st.markdown(
+            f'<div class="{css_class}"><strong>{icon} {label}</strong> &mdash; {result}</div>',
+            unsafe_allow_html=True,
+        )
 
-    # Bouton téléchargement Excel
+    # Bouton telechargement Excel
     if excel_path and excel_path.exists():
+        st.markdown("<br>", unsafe_allow_html=True)
         with open(excel_path, "rb") as f:
             st.download_button(
-                label="Télécharger le rapport Excel",
+                label="Telecharger le rapport Excel",
                 data=f.read(),
                 file_name=f"rapport_{project_name}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary",
                 use_container_width=True,
             )
 
-    # Logs détaillés (masqués par défaut)
-    with st.expander("Logs détaillés"):
+    # Logs detailles
+    with st.expander("Logs detailles"):
         st.code(log_handler.get_logs(), language="text")

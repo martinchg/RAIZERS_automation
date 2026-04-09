@@ -37,15 +37,6 @@ try:
 except ImportError:
     pd = None
 
-try:
-    from unstructured.partition.docx import partition_docx
-except ImportError:
-    partition_docx = None
-
-try:
-    from unstructured.partition.pptx import partition_pptx
-except ImportError:
-    partition_pptx = None
 
 # --- Configuration ---
 logging.basicConfig(level=logging.INFO)
@@ -97,45 +88,23 @@ def extract_html(file_path: Path) -> List[Dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# 2. DOCX (Unstructured) — identique à Text_extraction.py
+# 2. DOCX (python-docx)
 # ---------------------------------------------------------------------------
 def extract_docx(file_path: Path) -> List[Dict[str, Any]]:
-    # Essayer unstructured d'abord (meilleur rendu tableaux)
-    if partition_docx is not None:
-        try:
-            elements = partition_docx(filename=str(file_path))
-            formatted: List[str] = []
-            for el in elements:
-                text = str(el).strip()
-                if not text:
-                    continue
-                if el.category == "Title":
-                    formatted.append(f"\n## {text}")
-                elif el.category == "ListItem":
-                    formatted.append(f"- {text}")
-                elif el.category == "Table":
-                    formatted.append(f"\n{text}\n")
-                elif el.category not in {"Header", "Footer"}:
-                    formatted.append(text)
-
-            final_text = "\n\n".join(formatted)
-            if final_text:
-                return [{"text": final_text, "category": "DOCX", "metadata": {"filename": file_path.name}}]
-        except Exception as e:
-            logger.warning(f"⚠️ unstructured DOCX échoué, fallback python-docx : {e}")
-
-    # Fallback : python-docx (toujours disponible)
     try:
         from docx import Document
         doc = Document(str(file_path))
-        paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
-        # Extraire aussi le texte des tableaux
+        parts: List[str] = []
+        for p in doc.paragraphs:
+            text = p.text.strip()
+            if text:
+                parts.append(text)
         for table in doc.tables:
             for row in table.rows:
                 row_text = " | ".join(cell.text.strip() for cell in row.cells if cell.text.strip())
                 if row_text:
-                    paragraphs.append(row_text)
-        final_text = "\n\n".join(paragraphs)
+                    parts.append(row_text)
+        final_text = "\n\n".join(parts)
         if final_text:
             return [{"text": final_text, "category": "DOCX", "metadata": {"filename": file_path.name}}]
     except Exception as e:
@@ -143,29 +112,26 @@ def extract_docx(file_path: Path) -> List[Dict[str, Any]]:
     return []
 
 # ---------------------------------------------------------------------------
-# 3. PPTX (Unstructured) — identique à Text_extraction.py
+# 3. PPTX (python-pptx)
 # ---------------------------------------------------------------------------
 
 def extract_pptx(file_path: Path) -> List[Dict[str, Any]]:
-    if partition_pptx is None:
-        return []
     try:
-        elements = partition_pptx(filename=str(file_path))
-        formatted: List[str] = []
-        for el in elements:
-            text = str(el).strip()
-            if not text:
-                continue
-            if el.category == "Title":
-                formatted.append(f"\n## {text}")
-            elif el.category == "ListItem":
-                formatted.append(f"- {text}")
-            elif el.category == "Table":
-                formatted.append(f"\n{text}\n")
-            elif el.category not in {"Header", "Footer"}:
-                formatted.append(text)
-
-        final_text = "\n\n".join(formatted)
+        from pptx import Presentation
+        prs = Presentation(str(file_path))
+        parts: List[str] = []
+        for slide in prs.slides:
+            for shape in slide.shapes:
+                if shape.has_text_frame:
+                    text = shape.text_frame.text.strip()
+                    if text:
+                        parts.append(text)
+                if shape.has_table:
+                    for row in shape.table.rows:
+                        row_text = " | ".join(cell.text.strip() for cell in row.cells if cell.text.strip())
+                        if row_text:
+                            parts.append(row_text)
+        final_text = "\n\n".join(parts)
         if final_text:
             return [{"text": final_text, "category": "PPTX", "metadata": {"filename": file_path.name}}]
     except Exception as e:

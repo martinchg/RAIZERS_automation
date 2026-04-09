@@ -15,7 +15,6 @@ beautifulsoup4==4.14.3
 PyMuPDF==1.27.2.2
 pymupdf4llm==1.27.2.2
 # Python 3.14.3 sur Streamlit Cloud (cf. logs du 2026-04-09).
-unstructured==0.22.6
 python-docx==1.2.0
 python-pptx==1.0.2
 
