@@ -385,6 +385,40 @@ def _call_llm_with_retry(call_llm, prompt: str, max_retries: int = 3) -> Optiona
     return None
 
 
+def _stringify_non_table_value(value) -> str:
+    """Rend les réponses LLM non-table lisibles dans le JSON final."""
+    if isinstance(value, list):
+        rendered_items = []
+        for item in value:
+            if isinstance(item, dict):
+                name = (item.get("nom") or item.get("nom_complet") or item.get("denomination") or "").strip()
+                role = (item.get("fonction") or item.get("qualite") or item.get("role") or "").strip()
+                if name and role:
+                    rendered_items.append(f"{name} - {role}")
+                elif name:
+                    rendered_items.append(name)
+                elif role:
+                    rendered_items.append(role)
+                else:
+                    rendered_items.append(", ".join(f"{k}: {v}" for k, v in item.items() if v not in (None, "")))
+            else:
+                rendered_items.append(str(item))
+        return " ; ".join(part for part in rendered_items if part)
+    if isinstance(value, dict):
+        name = (value.get("nom") or value.get("nom_complet") or value.get("denomination") or "").strip()
+        role = (value.get("fonction") or value.get("qualite") or value.get("role") or "").strip()
+        if name and role:
+            return f"{name} - {role}"
+        if name:
+            return name
+        if role:
+            return role
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False)
+
+
 def run(project_id: str):
     project_dir = OUTPUT_DIR / project_id
     manifest_path = project_dir / "manifest.json"
@@ -516,13 +550,7 @@ def run(project_id: str):
         found = 0
         for field_id, value in answers.items():
             if field_id in results and value is not None and results[field_id] is None:
-                # Pour les champs string, aplatir les listes en texte lisible
-                if isinstance(value, list):
-                    results[field_id] = ", ".join(str(v) for v in value)
-                elif isinstance(value, str):
-                    results[field_id] = value
-                else:
-                    results[field_id] = json.dumps(value, ensure_ascii=False)
+                results[field_id] = _stringify_non_table_value(value)
                 found += 1
 
         # --- Stocker les champs per-person avec suffixe __N ---
@@ -550,11 +578,9 @@ def run(project_id: str):
                         if f.get("type") == "table":
                             results[key] = json.dumps(value, ensure_ascii=False)
                         else:
-                            results[key] = ", ".join(str(v) for v in value)
-                    elif isinstance(value, str):
-                        results[key] = value
+                            results[key] = _stringify_non_table_value(value)
                     else:
-                        results[key] = json.dumps(value, ensure_ascii=False)
+                        results[key] = _stringify_non_table_value(value)
                     found += 1
 
         # --- Stocker les champs per-company avec suffixe __N ---
@@ -584,11 +610,9 @@ def run(project_id: str):
                             if f.get("type") == "table":
                                 results[key] = json.dumps(value, ensure_ascii=False)
                             else:
-                                results[key] = ", ".join(str(v) for v in value)
-                        elif isinstance(value, str):
-                            results[key] = value
+                                results[key] = _stringify_non_table_value(value)
                         else:
-                            results[key] = json.dumps(value, ensure_ascii=False)
+                            results[key] = _stringify_non_table_value(value)
                         found += 1
 
         extraction_log.append({

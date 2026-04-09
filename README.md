@@ -35,7 +35,7 @@ Extrait les personnes depuis les casiers judiciaires, recherche leurs sociétés
 ### 4. Fill — Génération du rapport Excel
 
 ```bash
-python run.py fill --results output/raizers-en-audit-nom-du-projet/extraction_results.json
+python run.py fill --results output/raizers-en-audit-signature/extraction_results.json
 ```
 
 Génère `rapport.xlsx` avec 3 onglets (Opération, Patrimoine, Mandats). Charge automatiquement `mandats_results.json` s'il est présent dans le même dossier.

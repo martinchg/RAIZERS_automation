@@ -5,6 +5,7 @@ src/__pycache__/
 .claude/
 cache/
 output/
+config/
 logs/
 *.pyc
 .DS_Store
