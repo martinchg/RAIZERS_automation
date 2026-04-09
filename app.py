@@ -332,9 +332,13 @@ if st.button("Lancer l'audit", type="primary", use_container_width=True):
                     mandats_data = json.loads(mandats_path.read_text(encoding="utf-8"))
                     pappers_mandats = mandats_data.get("societes_par_personne")
 
+                fields = [
+                    f for f in questions_data["fields"]
+                    if isinstance(f, dict) and f.get("field_id")
+                ]
                 excel_path = fill_excel(
                     results=extraction_data["results"],
-                    fields=questions_data["fields"],
+                    fields=fields,
                     output_dir=project_dir,
                     person_folder_map=person_folder_map,
                     pappers_mandats=pappers_mandats,

@@ -100,25 +100,42 @@ def extract_html(file_path: Path) -> List[Dict[str, Any]]:
 # 2. DOCX (Unstructured) — identique à Text_extraction.py
 # ---------------------------------------------------------------------------
 def extract_docx(file_path: Path) -> List[Dict[str, Any]]:
-    if partition_docx is None:
-        return []
-    try:
-        elements = partition_docx(filename=str(file_path))
-        formatted: List[str] = []
-        for el in elements:
-            text = str(el).strip()
-            if not text:
-                continue
-            if el.category == "Title":
-                formatted.append(f"\n## {text}")
-            elif el.category == "ListItem":
-                formatted.append(f"- {text}")
-            elif el.category == "Table":
-                formatted.append(f"\n{text}\n")
-            elif el.category not in {"Header", "Footer"}:
-                formatted.append(text)
+    # Essayer unstructured d'abord (meilleur rendu tableaux)
+    if partition_docx is not None:
+        try:
+            elements = partition_docx(filename=str(file_path))
+            formatted: List[str] = []
+            for el in elements:
+                text = str(el).strip()
+                if not text:
+                    continue
+                if el.category == "Title":
+                    formatted.append(f"\n## {text}")
+                elif el.category == "ListItem":
+                    formatted.append(f"- {text}")
+                elif el.category == "Table":
+                    formatted.append(f"\n{text}\n")
+                elif el.category not in {"Header", "Footer"}:
+                    formatted.append(text)
 
-        final_text = "\n\n".join(formatted)
+            final_text = "\n\n".join(formatted)
+            if final_text:
+                return [{"text": final_text, "category": "DOCX", "metadata": {"filename": file_path.name}}]
+        except Exception as e:
+            logger.warning(f"⚠️ unstructured DOCX échoué, fallback python-docx : {e}")
+
+    # Fallback : python-docx (toujours disponible)
+    try:
+        from docx import Document
+        doc = Document(str(file_path))
+        paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+        # Extraire aussi le texte des tableaux
+        for table in doc.tables:
+            for row in table.rows:
+                row_text = " | ".join(cell.text.strip() for cell in row.cells if cell.text.strip())
+                if row_text:
+                    paragraphs.append(row_text)
+        final_text = "\n\n".join(paragraphs)
         if final_text:
             return [{"text": final_text, "category": "DOCX", "metadata": {"filename": file_path.name}}]
     except Exception as e:
