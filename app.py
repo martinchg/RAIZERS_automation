@@ -12,6 +12,7 @@ import re
 import smtplib
 import sys
 import time
+from datetime import datetime
 from email.message import EmailMessage
 from io import StringIO
 from pathlib import Path
@@ -28,6 +29,9 @@ configure_environment(ROOT_DIR)
 
 OUTPUT_DIR = ROOT_DIR / "output"
 LOGO_PATH = ROOT_DIR / "assets" / "raizers_logo.png"
+HISTORY_PATH = OUTPUT_DIR / "audit_history.json"
+AUTH_USER_ENV = "APP_AUTH_USER"
+AUTH_PASS_ENV = "APP_AUTH_PASS"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -140,6 +144,65 @@ def _send_email(to: str, subject: str, body: str, attachment_path: Path | None =
         server.login(smtp_user, smtp_pass)
         server.send_message(msg)
     return True
+
+
+def _get_auth_credentials() -> tuple[str, str]:
+    """Lit les identifiants d'accès depuis l'environnement."""
+    username = os.environ.get(AUTH_USER_ENV, "").strip()
+    password = os.environ.get(AUTH_PASS_ENV, "").strip()
+    return username, password
+
+
+def _load_audit_history() -> list[dict]:
+    if not HISTORY_PATH.exists():
+        return []
+    try:
+        payload = json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    return payload if isinstance(payload, list) else []
+
+
+def _append_audit_history(entry: dict, max_entries: int = 25) -> None:
+    history = _load_audit_history()
+    history.insert(0, entry)
+    HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    HISTORY_PATH.write_text(
+        json.dumps(history[:max_entries], ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _render_audit_history() -> None:
+    history = _load_audit_history()[:5]
+    if not history:
+        st.caption("Aucun audit lancé pour le moment.")
+        return
+
+    for entry in history:
+        started_at = entry.get("started_at", "")
+        project_name = entry.get("project_name", "Projet inconnu")
+        duration = entry.get("duration_seconds")
+        duration_label = f"{duration:.1f}s" if isinstance(duration, (int, float)) else "n/a"
+        status = "OK" if entry.get("success") else "Avec erreurs"
+        summary = entry.get("summary", {})
+
+        detail_parts = []
+        for key in ("pipeline", "extract", "mandats", "fill", "email"):
+            value = summary.get(key)
+            if value:
+                detail_parts.append(f"{key}: {value}")
+
+        st.markdown(
+            (
+                '<div class="history-card">'
+                f'<strong>{project_name}</strong><br>'
+                f'<span>{started_at} • {status} • {duration_label}</span>'
+                + (f'<br><span>{" | ".join(detail_parts)}</span>' if detail_parts else "")
+                + "</div>"
+            ),
+            unsafe_allow_html=True,
+        )
 
 
 class StreamlitLogHandler(logging.Handler):
@@ -306,19 +369,29 @@ st.markdown("""
     .top-logo {
         margin: -0.25rem 0 1.5rem 0;
     }
+    .history-card {
+        background: rgba(27,45,69,0.92);
+        border: 1px solid rgba(77,200,232,0.2);
+        border-radius: 12px;
+        padding: 0.85rem 1rem;
+        color: #FFFFFF;
+        margin-bottom: 0.7rem;
+    }
+    .history-card span {
+        color: rgba(255,255,255,0.72);
+        font-size: 0.88rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
 # Login
 # ---------------------------------------------------------------------------
-AUTH_USER = "admin123"
-AUTH_PASS = "raizers_crowdfunding"
-
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
 if not st.session_state.authenticated:
+    auth_user, auth_pass = _get_auth_credentials()
     logo_left, logo_center, logo_right = st.columns([1, 5, 1])
     with logo_center:
         st.image(str(LOGO_PATH), use_container_width=True)
@@ -326,11 +399,18 @@ if not st.session_state.authenticated:
     col_left, col_center, col_right = st.columns([1, 2, 1])
     with col_center:
         st.markdown("#### Connexion")
+        if not auth_user or not auth_pass:
+            st.error(
+                f"Authentification non configurée. Ajoute {AUTH_USER_ENV} et {AUTH_PASS_ENV} "
+                "dans `.env` en local ou dans `st.secrets` sur Streamlit Cloud."
+            )
+            st.stop()
+
         username = st.text_input("Identifiant", placeholder="Identifiant")
         password = st.text_input("Mot de passe", type="password", placeholder="Mot de passe")
 
         if st.button("Se connecter", type="primary", use_container_width=True):
-            if username == AUTH_USER and password == AUTH_PASS:
+            if username == auth_user and password == auth_pass:
                 st.session_state.authenticated = True
                 st.rerun()
             else:
@@ -346,11 +426,6 @@ logo_left, logo_center, logo_right = st.columns([1, 5, 1])
 with logo_center:
     st.image(str(LOGO_PATH), use_container_width=True)
 st.markdown('</div>', unsafe_allow_html=True)
-
-st.markdown("""
-<div class="main-header">
-</div>
-""", unsafe_allow_html=True)
 
 # --- Step 1 : Dossier ---
 st.markdown("""
@@ -415,6 +490,15 @@ email_to = ""
 if send_email:
     email_to = st.text_input("Email de notification", placeholder="prenom@raizers.com")
 
+# --- Historique ---
+st.markdown("""
+<div class="step-card">
+    <h3><span class="step-number">3</span> Historique recent</h3>
+</div>
+""", unsafe_allow_html=True)
+
+_render_audit_history()
+
 # --- Lancement ---
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -422,11 +506,28 @@ if st.button("Lancer l'audit", type="primary", use_container_width=True):
     if not selected_path:
         st.error("Sélectionne un dossier.")
         st.stop()
+    if send_email and not email_to:
+        st.error("Renseigne un email de notification pour activer l'envoi.")
+        st.stop()
 
     project_path = selected_path  # already a full Dropbox path
     project_id = _slugify(project_path)
     project_name = project_path.rstrip("/").rsplit("/", 1)[-1]  # dernier segment
     project_dir = OUTPUT_DIR / project_id
+    started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    started_perf = time.perf_counter()
+
+    execution_plan = [("pipeline", "Pipeline Dropbox")]
+    if run_extract:
+        execution_plan.append(("extract", "Extraction LLM"))
+    if run_mandats:
+        execution_plan.append(("mandats", "Mandats Pappers"))
+    if run_fill:
+        execution_plan.append(("fill", "Génération Excel"))
+    if send_email and email_to:
+        execution_plan.append(("email", "Envoi email"))
+    total_steps = len(execution_plan)
+    completed_steps = 0
 
     # Setup logging capture
     log_handler = StreamlitLogHandler()
@@ -437,6 +538,7 @@ if st.button("Lancer l'audit", type="primary", use_container_width=True):
 
     status = st.status("Audit en cours...", expanded=True)
     results_summary = {}
+    progress_bar = st.progress(0.0, text=f"Étape 1/{total_steps} — {execution_plan[0][1]}")
 
     # --- ÉTAPE 1 : Pipeline Dropbox ---
     try:
@@ -458,9 +560,18 @@ if st.button("Lancer l'audit", type="primary", use_container_width=True):
     except Exception as e:
         st.error(f"Pipeline : {e}")
         results_summary["pipeline"] = f"ERREUR : {e}"
+    completed_steps += 1
+    progress_bar.progress(
+        completed_steps / total_steps,
+        text=f"Étape {completed_steps}/{total_steps} — Pipeline Dropbox",
+    )
 
     # --- ÉTAPE 2 : Extraction LLM ---
     if run_extract:
+        progress_bar.progress(
+            completed_steps / total_steps,
+            text=f"Étape {completed_steps + 1}/{total_steps} — Extraction LLM",
+        )
         try:
             status.update(label="Extraction LLM...")
             st.write("**Extraction LLM** en cours...")
@@ -480,9 +591,18 @@ if st.button("Lancer l'audit", type="primary", use_container_width=True):
         except Exception as e:
             st.error(f"Extraction : {e}")
             results_summary["extract"] = f"ERREUR : {e}"
+        completed_steps += 1
+        progress_bar.progress(
+            completed_steps / total_steps,
+            text=f"Étape {completed_steps}/{total_steps} — Extraction LLM",
+        )
 
     # --- ÉTAPE 3 : Mandats Pappers ---
     if run_mandats:
+        progress_bar.progress(
+            completed_steps / total_steps,
+            text=f"Étape {completed_steps + 1}/{total_steps} — Mandats Pappers",
+        )
         try:
             status.update(label="Mandats Pappers...")
             st.write("**Mandats Pappers** en cours...")
@@ -502,10 +622,19 @@ if st.button("Lancer l'audit", type="primary", use_container_width=True):
         except Exception as e:
             st.error(f"Mandats : {e}")
             results_summary["mandats"] = f"ERREUR : {e}"
+        completed_steps += 1
+        progress_bar.progress(
+            completed_steps / total_steps,
+            text=f"Étape {completed_steps}/{total_steps} — Mandats Pappers",
+        )
 
     # --- ÉTAPE 4 : Excel ---
     excel_path = None
     if run_fill:
+        progress_bar.progress(
+            completed_steps / total_steps,
+            text=f"Étape {completed_steps + 1}/{total_steps} — Génération Excel",
+        )
         try:
             status.update(label="Génération Excel...")
             st.write("**Excel** — Génération du rapport...")
@@ -544,9 +673,18 @@ if st.button("Lancer l'audit", type="primary", use_container_width=True):
         except Exception as e:
             st.error(f"Excel : {e}")
             results_summary["fill"] = f"ERREUR : {e}"
+        completed_steps += 1
+        progress_bar.progress(
+            completed_steps / total_steps,
+            text=f"Étape {completed_steps}/{total_steps} — Génération Excel",
+        )
 
     # --- ÉTAPE 5 : Email ---
     if send_email and email_to and excel_path and excel_path.exists():
+        progress_bar.progress(
+            completed_steps / total_steps,
+            text=f"Étape {completed_steps + 1}/{total_steps} — Envoi email",
+        )
         try:
             status.update(label="Envoi email...")
             sent = _send_email(
@@ -561,15 +699,39 @@ if st.button("Lancer l'audit", type="primary", use_container_width=True):
         except Exception as e:
             st.error(f"Email : {e}")
             results_summary["email"] = f"ERREUR : {e}"
+        completed_steps += 1
+        progress_bar.progress(
+            completed_steps / total_steps,
+            text=f"Étape {completed_steps}/{total_steps} — Envoi email",
+        )
 
     # --- Résumé final ---
     root_logger.removeHandler(log_handler)
 
     all_ok = all("ERREUR" not in str(v) for v in results_summary.values())
+    duration_seconds = time.perf_counter() - started_perf
+    progress_bar.progress(1.0, text=f"Terminé en {duration_seconds:.1f}s")
     status.update(
         label="Audit terminé" if all_ok else "Audit terminé (avec erreurs)",
         state="complete" if all_ok else "error",
         expanded=False,
+    )
+    _append_audit_history(
+        {
+            "started_at": started_at,
+            "project_name": project_name,
+            "project_path": project_path,
+            "project_id": project_id,
+            "success": all_ok,
+            "duration_seconds": round(duration_seconds, 1),
+            "options": {
+                "extract": run_extract,
+                "mandats": run_mandats,
+                "fill": run_fill,
+                "send_email": send_email,
+            },
+            "summary": results_summary,
+        }
     )
 
     st.markdown("<br>", unsafe_allow_html=True)
