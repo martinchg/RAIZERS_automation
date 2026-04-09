@@ -1,0 +1,696 @@
+{
+  "_description": "Champs à extraire des documents projet pour remplir le tableau Excel Book1.xlsx",
+  "_notes": [
+    "hint_keywords = mots-clés à chercher dans le filename/source_path pour matcher le document",
+    "source_dirs = dossiers sources obligatoires (le doc DOIT être dans un de ces dossiers). Supporte {latest_folder} = dernier dossier numéroté dans 2. Audit/ (résolu à runtime depuis le manifest).",
+    "source_doc_name = nom du document source (sans chemin complet). Permet de matcher par nom de fichier seul.",
+    "context_hint = contexte métier envoyé au LLM pour l'aider à distinguer les infos",
+    "excel_sheet = nom de l'onglet Excel. Pour les champs patrimoine, '{person_name}' = placeholder, le pipeline crée un onglet par personne.",
+    "type = 'string' pour valeur simple, 'table' pour données tabulaires (array d'objets JSON). Pour type 'table', excel_cell_start = première cellule de données, column_mapping = colonnes Excel par clé."
+  ],
+
+  "fields": [
+    {
+      "field_id": "siren_emprunt",
+      "label": "N° SIREN (société emprunt)",
+      "question": "Quel est le numéro SIREN de la société portant l'EMPRUNT ? Retourne uniquement le numéro à 9 chiffres.",
+      "excel_cell": "D2",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": "9 chiffres avec espaces (ex: 123 456 789)",
+      "context_hint": "C'est la société ÉMETTRICE des obligations, celle qui emprunte via Raizers. C'est celle qui figure dans 'Identification de la personne morale' du fichier Kbis, ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'.",
+      "source_dirs": ["2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse"],
+      "hint_keywords": ["kbis", "statut", "contrat obligataire"]
+    },
+    {
+      "field_id": "ville_rcs_emprunt",
+      "label": "Ville du RCS (société emprunt)",
+      "question": "Quelle est la ville du RCS (Registre du Commerce et des Sociétés) de la société portant l'emprunt ?",
+      "excel_cell": "D3",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": null,
+      "context_hint": "La ville du RCS est celle du tribunal de commerce où la société emprunteuse est enregistrée. C'est celle qui figure dans identification de la personne morale du fichier Kbis, ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'.",
+      "source_dirs": ["2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse", "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse"],
+      "hint_keywords": ["kbis", "statut"]
+    },
+    {
+      "field_id": "date_immatriculation_emprunt",
+      "label": "Date d'immatriculation (société emprunt)",
+      "question": "Quelle est la date d'immatriculation de la société portant l'emprunt ?",
+      "excel_cell": "D4",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": "format JJ/MM/AAAA",
+      "context_hint": "Date d'immatriculation au RCS de la société emprunteuse. C'est celle qui figure dans identification de la personne morale du fichier Kbis, ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'.",
+      "source_dirs": ["2. Audit/1. Opérateur/ 1. Eléments juridiques/ Société Emprunteuse", "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse"],
+      "hint_keywords": ["kbis"]
+    },
+    {
+      "field_id": "raison_sociale_emprunt",
+      "label": "Raison Sociale (société emprunt)",
+      "question": "Quelle est la raison sociale exacte de la société portant l'emprunt ?",
+      "excel_cell": "D5",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": null,
+      "context_hint": "Nom officiel de la société emprunteuse (émettrice des obligations). C'est celle qui figure dans identification de la personne morale du fichier Kbis, ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'.",
+      "source_dirs": ["2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse", "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse"],
+      "hint_keywords": ["kbis", "statut", "contrat obligataire"]
+    },
+    {
+      "field_id": "forme_juridique_emprunt",
+      "label": "Forme Juridique (société emprunt)",
+      "question": "Quelle est la forme juridique de la société portant l'emprunt ? (SAS, SARL, SA, SCI, SCCV, etc.)",
+      "excel_cell": "D6",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": null,
+      "context_hint": "Forme juridique de la société emprunteuse. C'est celle qui figure dans identification de la personne morale du fichier Kbis, ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'.",
+      "source_dirs": ["2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse", "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse"],
+      "hint_keywords": ["kbis", "statut"]
+    },
+    {
+      "field_id": "capital_social_emprunt",
+      "label": "Capital social (société emprunt)",
+      "question": "Quel est le montant du capital social de la société portant l'emprunt ? Retourne uniquement le nombre, sans le symbole €.",
+      "excel_cell": "D7",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": "nombre avec espaces séparateurs de milliers, sans € (ex: 10 000).Ce montant apparait dans la section 'Identification de la personne morale' du Kbis, ou dans les statuts. Si tu trouves les deux, privilégie le montant du Kbis. Ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'.",
+      "context_hint": "Capital social de la société emprunteuse uniquement.",
+      "source_dirs": ["2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse", "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse"],
+      "hint_keywords": ["kbis", "statut", "bilan"]
+    },
+    {
+      "field_id": "adresse_siege_emprunt",
+      "label": "Adresse du siège (société emprunt)",
+      "question": "Quelle est l'adresse complète du siège social de la société portant l'emprunt ? cette adresse figure dans la section 'Identification de la personne morale' du Kbis, ou dans les statuts. Si tu trouves les deux, privilégie l'adresse du Kbis. Ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'.",
+      "excel_cell": "D8",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": null,
+      "context_hint": "Adresse du siège de la société emprunteuse.",
+      "source_dirs": ["2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse", "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse"],
+      "hint_keywords": ["kbis", "statut"]
+    },
+    {
+      "field_id": "activite_emprunt",
+      "label": "Activité (société emprunt)",
+      "question": "Quelle est l'activité de la société portant l'emprunt, telle qu'elle apparaîtrait sur infogreffe ?",
+      "excel_cell": "D9",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": null,
+      "context_hint": "L'objet social ou activité principale de la société emprunteuse. C'est celle qui figure dans identification de la personne morale du fichier Kbis, ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'.",
+      "source_dirs": ["2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse", "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse"],
+      "hint_keywords": ["kbis", "statut"]
+    },
+    {
+      "field_id": "dirigeants_emprunt",
+      "label": "Dirigeant(s) (société emprunt)",
+      "question": "Qui sont le ou les dirigeants de la société portant l'emprunt ? Liste les noms et fonctions si ce sont des êtres humains. Il est possible que ce ne soit pas un être humain mais un nom de société. Ici c'est la dénomination qui figure dans la section 'GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES' du Kbis qui prime sur les autres documents. Si tu trouves plusieurs listes de dirigeants, privilégie celle du Kbis.",
+      "excel_cell": "D10",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": null,
+      "context_hint": "Dirigeants de la société emprunteuse (président, gérant, DG).",
+      "source_dirs": ["2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse", "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse"],
+      "hint_keywords": ["kbis", "statut"]
+    },
+    {
+      "field_id": "siren_operation",
+      "label": "N° SIREN (société opération)",
+      "question": "Si la société portant l'opération est différente de celle portant l'emprunt, quel est son numéro SIREN ? Sinon retourne null.",
+      "excel_cell": "D11",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": "9 chiffres avec espaces, ou null si même société",
+      "context_hint": "La société opération est celle qui porte le projet immobilier (souvent SCI ou SCCV). Si c'est la même que l'emprunteur, retourne null.",
+      "source_dirs": ["2. Audit/1. Opérateur/1. Eléments juridiques/ Société Opération", "2. Audit/{latest_folder}"],
+      "hint_keywords": ["kbis", "statut"]
+    },
+    {
+      "field_id": "ville_rcs_operation",
+      "label": "Ville du RCS (société opération)",
+      "question": "Si la société portant l'opération est différente, quelle est la ville de son RCS ?",
+      "excel_cell": "D12",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": null,
+      "context_hint": "Ville du RCS de la société portant l'opération (si différente de l'emprunteuse).",
+      "source_dirs": ["2. Audit/1. Opérateur/1. Eléments juridiques/ Société Opération", "2. Audit/{latest_folder}"],
+      "hint_keywords": ["kbis", "statut"]
+    },
+    {
+      "field_id": "date_immatriculation_operation",
+      "label": "Date d'immatriculation (société opération)",
+      "question": "Si la société portant l'opération est différente, quelle est sa date d'immatriculation ?",
+      "excel_cell": "D13",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": "format JJ/MM/AAAA ou null",
+      "context_hint": "Date d'immatriculation de la société portant l'opération.",
+      "source_dirs": ["2. Audit/1. Opérateur/1. Eléments juridiques/ Société Opération", "2. Audit/{latest_folder}"],
+      "hint_keywords": ["kbis"]
+    },
+    {
+      "field_id": "raison_sociale_operation",
+      "label": "Raison Sociale (société opération)",
+      "question": "Si la société portant l'opération est différente, quelle est sa raison sociale exacte ?",
+      "excel_cell": "D14",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": null,
+      "context_hint": "Nom officiel de la société portant l'opération immobilière.",
+      "source_dirs": ["2. Audit/1. Opérateur/1. Eléments juridiques/ Société Opération", "2. Audit/{latest_folder}"],
+      "hint_keywords": ["kbis", "statut", "contrat obligataire"]
+    },
+    {
+      "field_id": "forme_juridique_operation",
+      "label": "Forme Juridique (société opération)",
+      "question": "Si la société portant l'opération est différente, quelle est sa forme juridique ?",
+      "excel_cell": "D15",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": null,
+      "source_dirs": ["2. Audit/1. Opérateur/1. Eléments juridiques/ Société Opération", "2. Audit/{latest_folder}"],
+      "hint_keywords": ["kbis", "statut"]
+    },
+    {
+      "field_id": "capital_social_operation",
+      "label": "Capital social (société opération)",
+      "question": "Si la société portant l'opération est différente, quel est son capital social ? Sans le symbole €.",
+      "excel_cell": "D16",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": "nombre avec espaces, sans €, ou null",
+      "source_dirs": ["2. Audit/1. Opérateur/1. Eléments juridiques/ Société Opération", "2. Audit/{latest_folder}"],
+      "hint_keywords": ["kbis", "statut", "bilan"]
+    },
+    {
+      "field_id": "adresse_siege_operation",
+      "label": "Adresse du siège (société opération)",
+      "question": "Si la société portant l'opération est différente, quelle est l'adresse de son siège social ?",
+      "excel_cell": "D17",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": null,
+      "source_dirs": ["2. Audit/1. Opérateur/1. Eléments juridiques/ Société Opération", "2. Audit/{latest_folder}"],
+      "hint_keywords": ["kbis", "statut"]
+    },
+    {
+      "field_id": "activite_operation",
+      "label": "Activité (société opération)",
+      "question": "Si la société portant l'opération est différente, quelle est son activité ?",
+      "excel_cell": "D18",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": null,
+      "source_dirs": ["2. Audit/1. Opérateur/1. Eléments juridiques/ Société Opération", "2. Audit/{latest_folder}"],
+      "hint_keywords": ["kbis", "statut"]
+    },
+    {
+      "field_id": "dirigeants_operation",
+      "label": "Dirigeant(s) (société opération)",
+      "question": "Si la société portant l'opération est différente, qui sont ses dirigeants ?",
+      "excel_cell": "D19",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": null,
+      "source_dirs": ["2. Audit/1. Opérateur/1. Eléments juridiques/ Société Opération", "2. Audit/{latest_folder}"],
+      "hint_keywords": ["kbis", "statut"]
+    },
+    {
+      "field_id": "objet_financement",
+      "label": "Objet du financement",
+      "question": "Identifie la nature précise de l'opération (acquisition, construction, rénovation, marchand de biens, etc.) en listant toutes les étapes combinées si nécessaire, selon les sections 'Objet' ou 'Utilisation des fonds' du contrat obligataire",
+      "excel_cell": "D20",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": null,
+      "context_hint": "L'objet décrit ce que finance l'emprunt obligataire : achat-revente, construction, rénovation, promotion, etc.",
+      "hint_keywords": ["contrat obligataire", "contrat", "financement"]
+    },
+    {
+      "field_id": "localisation_projet",
+      "label": "Localisation du projet",
+      "question": "Extrais l'adresse physique exacte du projet (terrain, construction ou immeuble existant) en privilégiant systématiquement les mentions du contrat obligataire, tout en veillant à ne pas la confondre avec l'adresse du siège social de la société emprunteuse.",
+      "type": "string",
+      "format_hint": null,
+      "hint_keywords": ["PV", "procès verbal", "adresse du projet", "devis", "financement"]
+    },
+    {
+      "field_id": "taux_interet",
+      "label": "Taux d'intérêt de l'obligation",
+      "question": "Quel est le taux d'intérêt annuel de l'obligation ? Retourne le pourcentage (ex: 8.5).",
+      "excel_cell": "D22",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": "nombre + % (ex: 8.5%)",
+      "context_hint": "Le taux d'intérêt annuel fixe des obligations émises. Peut aussi être appelé 'taux nominal' ou 'coupon'.",
+      "hint_keywords": ["contrat obligataire", "contrat", "obligation"]
+    },
+    {
+      "field_id": "montant_collecte",
+      "label": "Montant de la collecte",
+      "question": "Quel est le montant total de la collecte obligataire ? Retourne uniquement le nombre, sans €.",
+      "excel_cell": "D23",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": "nombre avec espaces, sans € (ex: 1 500 000)",
+      "context_hint": "C'est le montant maximum de l'émission obligataire (pas le montant du projet total). Souvent mentionné comme 'montant de l'emprunt obligataire'.",
+      "hint_keywords": ["contrat obligataire", "contrat", "obligation"]
+    },
+    {
+      "field_id": "maturite_mois",
+      "label": "Maturité (en mois)",
+      "question": "Quelle est la maturité de l'obligation en mois ?",
+      "excel_cell": "D27",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": "nombre de mois (ex: 24)",
+      "hint_keywords": ["contrat obligataire", "contrat", "obligation"]
+    },
+
+    {
+      "_comment": "=== TABLE 2 : SITUATION PATRIMONIALE (1 onglet par personne) ===",
+      "field_id": "patrimoine_personne_nom",
+      "label": "Nom et prénom de la personne",
+      "question": "Quel est le nom complet (NOM Prénom) de la personne déclarant son patrimoine immobilier dans ce document ? S'il y a un couple (régime communauté), retourne les deux noms séparés par ' & '.",
+      "excel_cell": null,
+      "excel_sheet": "{person_name}",
+      "type": "string",
+      "format_hint": "NOM Prénom (ex: DUPONT Jean) ou NOM1 Prénom1 & NOM2 Prénom2 si couple",
+      "context_hint": "Ce nom servira de titre pour l'onglet Excel. Il est extrait du nom de fichier (ex: 'Attestation patrimoniale complétée Dupont Jean.docx') ou du contenu du document.",
+      "source_doc_name_variants": [
+        "attestation patrimoniale",
+        "attestation patrimoniale completee",
+        "fiche patrimoniale",
+        "fiche de renseignements patrimoniale",
+        "fiche de renseignements patrimoniales"
+      ],
+      "source_dirs": ["2. Audit/1. Opérateur/3. RH", "2. Audit/1. Opérateur","2. Audit/1. Opérateur/3. Ressources Humaines", "2. Audit/1. Opérateur/RH"],
+      "hint_keywords": ["attestation", "patrimoniale", "patrimoine"]
+    },
+    {
+      "field_id": "patrimoine_regime_matrimonial",
+      "label": "Régime matrimonial de l'opérateur",
+      "question": "Quel est le régime matrimonial de la personne ? (Séparation des biens, Communauté réduite aux acquêts, Communauté universelle, Célibataire, Pacsé, etc.). Très majoritairement à choisir entre 'Séparation des biens', 'Communauté légale réduite aux acquêts' ou 'Communauté universelle' mais vérifie bien le document pour être sûr. Si tu trouves une mention de régime matrimonial différent pour un couple, privilégie cette mention plutôt que les régimes individuels.",
+      "excel_cell": "D3",
+      "excel_sheet": "{person_name}",
+      "type": "string",
+      "format_hint": "ex: Séparation des biens",
+      "context_hint": "Le régime matrimonial figure souvent en haut du document d'attestation patrimoniale.",
+      "source_doc_name_variants": [
+        "attestation patrimoniale",
+        "attestation patrimoniale completee",
+        "fiche de renseignements patrimoniale",
+        "fiche patrimoniale"
+      ],
+      "source_dirs": ["2. Audit/1. Opérateur/3. RH", "2. Audit/1. Opérateur"],
+      "hint_keywords": ["attestation", "patrimoniale", "patrimoine"]
+    },
+    {
+      "field_id": "patrimoine_immobilier_table",
+      "label": "Tableau du patrimoine immobilier",
+      "question": "Extrais le tableau complet du patrimoine immobilier en detail. Les infos doivent venir uniquement du tableau patrimoine immobilier. Pour chaque bien, retourne un objet JSON avec les clés suivantes : type_detention (type de bien en y ajoutant la surface si elle est présente, par exemple 'Maison - 73 m²', 'Appartement - 45 m²', 'Immeuble - 210 m²', sinon retourne seulement le type de bien), pct_detention (pourcentage de détention, en pourcentage suivi de %), adresse (adresse complète + destination : RP=Résidence Principale, RS=Résidence Secondaire, RL=Résidence Locative), valeur_bien (valeur à trouver dans 'estimation actuelle du bien', nombre sans €), valeur_banque (valeur à trouver dans 'capital restant dû' , nombre sans €, sinon null), revenus_locatifs (revenus annuels si locatif ou fonciers, à trouver dans le tableau patrimoine immobilier ou le tableau revenus de type fonciser ou immobilier ou loyers, nombre seul sans €, sinon null), garanties_donnees (CP=Caution personnelle, GAPD=Garantie à première demande, HP=Hypothèque, PPD=Privilège de prêteur de deniers, NANT=nantissement, FD=Fiducie...). Retourne un array JSON de ces objets.",
+      "excel_cell_start": "B9",
+      "excel_sheet": "{person_name}",
+      "type": "table",
+      "column_mapping": {
+        "type_detention": "B",
+        "pct_detention": "C",
+        "adresse": "D",
+        "valeur_bien": "E",
+        "valeur_banque": "F",
+        "revenus_locatifs": "H",
+        "garanties_donnees": "I"
+      },
+      "format_hint": "Array JSON d'objets, un par bien immobilier",
+      "context_hint": "Le tableau patrimoine immobilier liste tous les biens détenus par la personne. Si la surface du bien est présente dans le tableau, ajoute-la directement dans la valeur de type_detention au format 'Type - surface m²'. Les valeurs monétaires sont des nombres sans €. La colonne G (valeur nette détenue) est calculée par formule Excel = (E-F)*C, ne pas la remplir.",
+      "source_doc_name_variants": [
+        "attestation patrimoniale",
+        "attestation patrimoniale completee"
+      ],
+      "source_dirs": ["2. Audit/1. Opérateur/3. RH", "2. Audit/1. Opérateur"],
+      "hint_keywords": ["attestation", "patrimoniale", "patrimoine"]
+    },
+
+    {
+      "_comment": "=== TABLE 3 : BILAN SIMPLIFIÉ (1 onglet par entreprise, colonnes N et N-1) ===",
+      "_naming_hint": "Le fichier source s'appelle souvent 'bilan année nom_entreprise' mais pas forcément dans cet ordre. Exemples : 'SIGNATURE bilan 2022 projet.pdf', 'bilan 2022 SIGNATURE.pdf', 'comptes annuels GARONNE 2023.pdf'."
+    },
+    {
+      "field_id": "bilan_societe_nom",
+      "label": "Nom de la société du bilan",
+      "question": "Quel est le nom de la société dont ce document présente le bilan ou les comptes annuels ? Cherche la 'Désignation de l'entreprise' en haut du bilan, ou le nom sur la page de garde des comptes annuels (ex: 'SAS SIGNATURE'). Retourne le nom complet avec la forme juridique.",
+      "excel_cell": null,
+      "excel_sheet": "{company_name}",
+      "type": "string",
+      "format_hint": "Nom complet (ex: SAS SIGNATURE)",
+      "context_hint": "Ce nom servira de titre pour l'onglet Excel du bilan de cette société. Il figure généralement en en-tête de chaque page du bilan ('Désignation de l'entreprise'), sur la page de garde, ou dans le nom du fichier. Le fichier s'appelle souvent 'bilan année nom_entreprise' ou 'nom_entreprise bilan année' ou encore 'comptes annuels année nom_entreprise', pas forcément dans cet ordre.",
+      "source_doc_name_variants": [
+        "bilan",
+        "comptes annuels",
+        "etats financiers",
+        "liasse fiscale",
+        "2033"
+      ],
+      "source_dirs": ["2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers", "2. Audit/1. Opérateur/2. Eléments financiers"],
+      "hint_keywords": ["bilan", "comptes annuels", "liasse", "etats financiers"]
+    },
+
+    {
+      "_comment": "--- Dates d'arrêté N et N-1 ---"
+    },
+    {
+      "field_id": "bilan_date_arrete_n",
+      "label": "Date d'arrêté des comptes (exercice N)",
+      "question": "Quelle est la date de clôture de l'EXERCICE LE PLUS RÉCENT présenté dans ce bilan ? C'est la date principale du document, celle de la colonne 'Exercice N clos le' (2033-A) ou la date en en-tête du bilan (ex: '31/12/2022'). Dans le bilan simplifié 2033-A, c'est la date indiquée en haut à droite 'Exercice N clos le'.",
+      "excel_cell": null,
+      "excel_sheet": "{company_name}",
+      "type": "string",
+      "format_hint": "format JJ/MM/AAAA (ex: 31/12/2022)",
+      "context_hint": "C'est la date de l'exercice courant, le plus récent. Elle est affichée en évidence en haut du bilan.",
+      "source_doc_name_variants": ["bilan", "comptes annuels", "etats financiers", "liasse fiscale", "2033"],
+      "source_dirs": ["2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers", "2. Audit/1. Opérateur/2. Eléments financiers"],
+      "hint_keywords": ["bilan", "comptes annuels", "liasse", "etats financiers"]
+    },
+    {
+      "field_id": "bilan_date_arrete_n1",
+      "label": "Date d'arrêté des comptes (exercice N-1)",
+      "question": "Quelle est la date de clôture de l'EXERCICE PRÉCÉDENT (N-1) présenté dans ce bilan ? Dans le bilan simplifié 2033-A, c'est la date indiquée en haut à droite 'Exercice N-1 clos le'. Dans le bilan complet, c'est l'en-tête de la dernière colonne 'Net' à droite. ATTENTION : ne retourne PAS la même date que l'exercice N. Si le bilan ne présente qu'un seul exercice (premier exercice de la société, colonne N-1 vide), retourne null.",
+      "excel_cell": null,
+      "excel_sheet": "{company_name}",
+      "type": "string",
+      "format_hint": "format JJ/MM/AAAA ou null si premier exercice",
+      "context_hint": "C'est la date de l'exercice PRÉCÉDENT, pas l'exercice courant. Dans le 2033-A, elle se trouve à côté de 'Exercice N-1 clos le'. Si cette mention est absente ou vide (case 'Néant'), c'est que la société n'a qu'un seul exercice : retourne null.",
+      "source_doc_name_variants": ["bilan", "comptes annuels", "etats financiers", "liasse fiscale", "2033"],
+      "source_dirs": ["2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers", "2. Audit/1. Opérateur/2. Eléments financiers"],
+      "hint_keywords": ["bilan", "comptes annuels", "liasse", "etats financiers"]
+    },
+
+    {
+      "_comment": "--- ACTIF : Exercice N (colonne 3 du 2033-A = Net exercice courant) ---"
+    },
+    {
+      "field_id": "bilan_immobilisations_corporelles_n",
+      "label": "Immobilisations corporelles net (N)",
+      "question": "Quel est le montant NET des immobilisations corporelles pour l'EXERCICE N (exercice le plus récent) ? Dans le 2033-A, c'est la ligne 028 colonne 'Net' 3 (Exercice N). Dans le bilan complet, c'est la colonne 'Net' principale du Bilan Actif. Retourne uniquement le nombre, sans €.",
+      "excel_cell": null,
+      "excel_sheet": "{company_name}",
+      "type": "string",
+      "format_hint": "nombre sans € (ex: 472). 0 si absent.",
+      "context_hint": "Immobilisations corporelles = terrains + constructions + installations techniques + matériel de transport + autres. On veut le NET (brut - amortissements). COLONNE EXERCICE N = la plus récente, à gauche de la colonne N-1.",
+      "source_doc_name_variants": ["bilan", "comptes annuels", "etats financiers", "liasse fiscale", "2033"],
+      "source_dirs": ["2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers", "2. Audit/1. Opérateur/2. Eléments financiers"],
+      "hint_keywords": ["bilan", "comptes annuels", "liasse", "actif"]
+    },
+    {
+      "field_id": "bilan_immobilisations_financieres_n",
+      "label": "Immobilisations financières net (N)",
+      "question": "Quel est le montant NET TOTAL des immobilisations financières pour l'EXERCICE N (exercice le plus récent) ? Dans le 2033-A, prends le total de la section 'IMMOBILISATIONS FINANCIÈRES (2)' dans la colonne 'Net' de l'exercice N. Il faut additionner l'ensemble du bloc financier si plusieurs lignes ont des montants (participations, autres participations, créances rattachées à des participations, autres titres immobilisés, prêts, autres immobilisations financières). Ne confonds pas avec les immobilisations corporelles ni avec le total général de l'actif immobilisé. Retourne uniquement le nombre, sans €.",
+      "excel_cell": null,
+      "excel_sheet": "{company_name}",
+      "type": "string",
+      "format_hint": "nombre sans € (ex: 450). 0 si absent.",
+      "context_hint": "On veut le TOTAL NET du bloc 'IMMOBILISATIONS FINANCIÈRES (2)' uniquement, dans la colonne de l'exercice N. Si une seule ligne du bloc porte une valeur (ex: 'Autres participations' = 450), alors le total des immobilisations financières est cette valeur. Ne recopie jamais la valeur des immobilisations corporelles juste au-dessus.",
+      "source_doc_name_variants": ["bilan", "comptes annuels", "etats financiers", "liasse fiscale", "2033"],
+      "source_dirs": ["2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers", "2. Audit/1. Opérateur/2. Eléments financiers"],
+      "hint_keywords": ["bilan", "comptes annuels", "liasse", "actif"]
+    },
+    {
+      "field_id": "bilan_creances_n",
+      "label": "Créances net (N)",
+      "question": "Quel est le montant NET total des créances pour l'EXERCICE N (exercice le plus récent) ? Dans le 2033-A, additionne 'Clients et comptes rattachés' (068/070) + 'Autres créances' (072/074), colonne Net 3. Ne pas inclure stocks, disponibilités ni VMP. Retourne uniquement le nombre, sans €.",
+      "excel_cell": null,
+      "excel_sheet": "{company_name}",
+      "type": "string",
+      "format_hint": "nombre sans € (ex: 28 670). 0 si absent.",
+      "context_hint": "Créances = créances clients + autres créances dans l'actif circulant. COLONNE EXERCICE N uniquement.",
+      "source_doc_name_variants": ["bilan", "comptes annuels", "etats financiers", "liasse fiscale", "2033"],
+      "source_dirs": ["2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers", "2. Audit/1. Opérateur/2. Eléments financiers"],
+      "hint_keywords": ["bilan", "comptes annuels", "liasse", "actif"]
+    },
+    {
+      "field_id": "bilan_tresorerie_n",
+      "label": "Trésorerie / disponibilités (N)",
+      "question": "Quel est le montant des disponibilités (trésorerie) pour l'EXERCICE N (exercice le plus récent) ? Dans le 2033-A, c'est la ligne 084/086 colonne Net 3. Ajouter les VMP (080/082) si présentes. Retourne uniquement le nombre, sans €.",
+      "excel_cell": null,
+      "excel_sheet": "{company_name}",
+      "type": "string",
+      "format_hint": "nombre sans € (ex: 128). 0 si absent.",
+      "context_hint": "Disponibilités = comptes bancaires + caisse. COLONNE EXERCICE N uniquement.",
+      "source_doc_name_variants": ["bilan", "comptes annuels", "etats financiers", "liasse fiscale", "2033"],
+      "source_dirs": ["2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers", "2. Audit/1. Opérateur/2. Eléments financiers"],
+      "hint_keywords": ["bilan", "comptes annuels", "liasse", "actif"]
+    },
+
+    {
+      "_comment": "--- PASSIF : Exercice N (colonne 1 du passif 2033-A = Exercice N NET) ---"
+    },
+    {
+      "field_id": "bilan_capital_social_n",
+      "label": "Capital social (N)",
+      "question": "Quel est le capital social pour l'EXERCICE N (exercice le plus récent) ? Dans le 2033-A, c'est la ligne 120, colonne 'Exercice N NET' 1. Retourne uniquement le nombre, sans €.",
+      "excel_cell": null,
+      "excel_sheet": "{company_name}",
+      "type": "string",
+      "format_hint": "nombre sans € (ex: 5 000).",
+      "context_hint": "Capital social = haut de la section Capitaux Propres au passif. COLONNE EXERCICE N uniquement.",
+      "source_doc_name_variants": ["bilan", "comptes annuels", "etats financiers", "liasse fiscale", "2033"],
+      "source_dirs": ["2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers", "2. Audit/1. Opérateur/2. Eléments financiers"],
+      "hint_keywords": ["bilan", "comptes annuels", "liasse", "passif"]
+    },
+    {
+      "field_id": "bilan_resultat_exercice_n",
+      "label": "Résultat de l'exercice (N)",
+      "question": "Quel est le résultat net pour l'EXERCICE N (exercice le plus récent) ? Dans le 2033-A, c'est la ligne 136, colonne 'Exercice N NET' 1. Si perte, retourne un nombre négatif. Les parenthèses (2 480) signifient -2 480. Retourne uniquement le nombre, sans €.",
+      "excel_cell": null,
+      "excel_sheet": "{company_name}",
+      "type": "string",
+      "format_hint": "nombre sans €, négatif si perte (ex: -2 480).",
+      "context_hint": "Résultat = dans les capitaux propres au passif ou en bas du compte de résultat. Parenthèses = négatif. COLONNE EXERCICE N uniquement.",
+      "source_doc_name_variants": ["bilan", "comptes annuels", "etats financiers", "liasse fiscale", "2033"],
+      "source_dirs": ["2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers", "2. Audit/1. Opérateur/2. Eléments financiers"],
+      "hint_keywords": ["bilan", "comptes annuels", "liasse", "passif", "résultat"]
+    },
+    {
+      "field_id": "bilan_capitaux_propres_n",
+      "label": "Total capitaux propres (N)",
+      "question": "Quel est le total des capitaux propres pour l'EXERCICE N (exercice le plus récent) ? Dans le 2033-A, c'est la ligne 142 'Total I', colonne 'Exercice N NET' 1. = capital + primes + réserves + report à nouveau + résultat. Retourne uniquement le nombre, sans €.",
+      "excel_cell": null,
+      "excel_sheet": "{company_name}",
+      "type": "string",
+      "format_hint": "nombre sans €, peut être négatif (ex: 2 520).",
+      "context_hint": "Total I au passif. COLONNE EXERCICE N uniquement.",
+      "source_doc_name_variants": ["bilan", "comptes annuels", "etats financiers", "liasse fiscale", "2033"],
+      "source_dirs": ["2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers", "2. Audit/1. Opérateur/2. Eléments financiers"],
+      "hint_keywords": ["bilan", "comptes annuels", "liasse", "passif", "capitaux propres"]
+    },
+    {
+      "field_id": "bilan_dettes_financieres_n",
+      "label": "Dettes financières diverses (N)",
+      "question": "Quel est le montant total des dettes financières pour l'EXERCICE N (exercice le plus récent) ? Additionne : emprunts obligataires + emprunts bancaires + dettes financières diverses + autres dettes (y compris comptes courants d'associés). Dans le 2033-A c'est lignes 156 + 172, colonne 'Exercice N NET' 1. Ne PAS inclure dettes fournisseurs ni dettes fiscales/sociales. Retourne uniquement le nombre, sans €.",
+      "excel_cell": null,
+      "excel_sheet": "{company_name}",
+      "type": "string",
+      "format_hint": "nombre sans € (ex: 27 200). 0 si absent.",
+      "context_hint": "Dettes financières = emprunts + dettes financières diverses + autres dettes (CCA). Exclure fournisseurs et fiscal/social. COLONNE EXERCICE N uniquement.",
+      "source_doc_name_variants": ["bilan", "comptes annuels", "etats financiers", "liasse fiscale", "2033"],
+      "source_dirs": ["2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers", "2. Audit/1. Opérateur/2. Eléments financiers"],
+      "hint_keywords": ["bilan", "comptes annuels", "liasse", "passif", "dettes"]
+    },
+    {
+      "field_id": "bilan_comptes_courants_n",
+      "label": "Comptes courants d'associés (N)",
+      "question": "Quel est le montant des comptes courants d'associés AU PASSIF pour l'EXERCICE N (exercice le plus récent) ? Dans le 2033-A, c'est le renvoi de la ligne 172 'Autres dettes' : 'dont comptes courants d'associés de l'exercice N : ...' (ligne 169). Retourne uniquement le nombre, sans €.",
+      "excel_cell": null,
+      "excel_sheet": "{company_name}",
+      "type": "string",
+      "format_hint": "nombre sans € (ex: 27 200). 0 si absent.",
+      "context_hint": "CCA = sommes avancées par les associés. Clé pour le calcul du gearing. COLONNE EXERCICE N uniquement.",
+      "source_doc_name_variants": ["bilan", "comptes annuels", "etats financiers", "liasse fiscale", "2033"],
+      "source_dirs": ["2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers", "2. Audit/1. Opérateur/2. Eléments financiers"],
+      "hint_keywords": ["bilan", "comptes annuels", "liasse", "passif", "comptes courants"]
+    },
+    {
+      "field_id": "bilan_dettes_bancaires_n",
+      "label": "Dettes bancaires (N)",
+      "question": "Quel est le montant des emprunts et dettes auprès des établissements de crédit (dettes bancaires) pour l'EXERCICE N (exercice le plus récent) ? Dans le bilan détaillé, c'est la ligne 'Emprunts dettes auprès des établissements de crédit'. Dans le 2033-A, c'est la ligne 156 si elle ne contient que des dettes bancaires. Ne pas inclure les comptes courants ni les emprunts obligataires. Retourne uniquement le nombre, sans €.",
+      "excel_cell": null,
+      "excel_sheet": "{company_name}",
+      "type": "string",
+      "format_hint": "nombre sans € (ex: 755 480). 0 si absent.",
+      "context_hint": "Dettes bancaires = emprunts contractés auprès de banques uniquement. COLONNE EXERCICE N uniquement.",
+      "source_doc_name_variants": ["bilan", "comptes annuels", "etats financiers", "liasse fiscale", "2033"],
+      "source_dirs": ["2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers", "2. Audit/1. Opérateur/2. Eléments financiers"],
+      "hint_keywords": ["bilan", "comptes annuels", "liasse", "passif", "dettes", "bancaire"]
+    },
+    {
+      "field_id": "bilan_chiffre_affaires_n",
+      "label": "Chiffre d'affaires (N)",
+      "question": "Quel est le chiffre d'affaires pour l'EXERCICE N (exercice le plus récent) ? Cherche 'Montant net du chiffre d'affaires' dans le compte de résultat, colonne Exercice N. = ventes de marchandises + production vendue. Retourne uniquement le nombre, sans €.",
+      "excel_cell": null,
+      "excel_sheet": "{company_name}",
+      "type": "string",
+      "format_hint": "nombre sans € (ex: 1 500 000). 0 si absent.",
+      "context_hint": "CA = haut du compte de résultat. COLONNE EXERCICE N uniquement (la plus récente).",
+      "source_doc_name_variants": ["bilan", "comptes annuels", "etats financiers", "liasse fiscale", "2033"],
+      "source_dirs": ["2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers", "2. Audit/1. Opérateur/2. Eléments financiers"],
+      "hint_keywords": ["bilan", "comptes annuels", "liasse", "résultat", "chiffre d'affaires"]
+    },
+
+    {
+      "_comment": "--- ACTIF : Exercice N-1 (colonne 4 du 2033-A = Net exercice précédent) --- ATTENTION : valeurs DIFFÉRENTES de N, issues de la colonne de droite du bilan ---"
+    },
+    {
+      "field_id": "bilan_immobilisations_corporelles_n1",
+      "label": "Immobilisations corporelles net (N-1)",
+      "question": "Quel est le montant NET des immobilisations corporelles pour l'EXERCICE PRÉCÉDENT (N-1) ? Dans le 2033-A, c'est la ligne 028, colonne 'Net' 4 (colonne de DROITE intitulée 'Exercice N-1 clos le'). Dans le bilan complet, c'est la dernière colonne 'Net' à droite. ATTENTION : ne recopie PAS la valeur de l'exercice N (colonne 3), il faut la colonne N-1 (colonne 4). Si la colonne N-1 est vide ou absente (premier exercice), retourne null.",
+      "excel_cell": null,
+      "excel_sheet": "{company_name}",
+      "type": "string",
+      "format_hint": "nombre sans € ou null si premier exercice.",
+      "context_hint": "COLONNE EXERCICE N-1 = la colonne la plus à DROITE du bilan actif, intitulée 'Exercice N-1' ou sans en-tête explicite. Cette colonne contient les chiffres de l'ANNÉE PRÉCÉDENTE. Elle peut être totalement vide si c'est le premier exercice de la société.",
+      "source_doc_name_variants": ["bilan", "comptes annuels", "etats financiers", "liasse fiscale", "2033"],
+      "source_dirs": ["2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers", "2. Audit/1. Opérateur/2. Eléments financiers"],
+      "hint_keywords": ["bilan", "comptes annuels", "liasse", "actif"]
+    },
+    {
+      "field_id": "bilan_immobilisations_financieres_n1",
+      "label": "Immobilisations financières net (N-1)",
+      "question": "Quel est le montant NET TOTAL des immobilisations financières pour l'EXERCICE PRÉCÉDENT (N-1) ? Dans le 2033-A, prends le total de la section 'IMMOBILISATIONS FINANCIÈRES (2)' dans la colonne 'Net' de l'exercice N-1 (colonne de droite). Il faut additionner l'ensemble du bloc financier si plusieurs lignes ont des montants. ATTENTION : ne recopie PAS la valeur de l'exercice N et ne confonds pas avec les immobilisations corporelles. Si la colonne N-1 est vide, retourne null.",
+      "excel_cell": null,
+      "excel_sheet": "{company_name}",
+      "type": "string",
+      "format_hint": "nombre sans € ou null si premier exercice.",
+      "context_hint": "On veut le TOTAL NET du bloc 'IMMOBILISATIONS FINANCIÈRES (2)' uniquement, dans la colonne N-1 (colonne de droite). Si une seule ligne du bloc porte une valeur, alors le total est cette valeur. Peut être vide si premier exercice.",
+      "source_doc_name_variants": ["bilan", "comptes annuels", "etats financiers", "liasse fiscale", "2033"],
+      "source_dirs": ["2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers", "2. Audit/1. Opérateur/2. Eléments financiers"],
+      "hint_keywords": ["bilan", "comptes annuels", "liasse", "actif"]
+    },
+    {
+      "field_id": "bilan_creances_n1",
+      "label": "Créances net (N-1)",
+      "question": "Quel est le montant NET total des créances pour l'EXERCICE PRÉCÉDENT (N-1) ? Dans le 2033-A, lignes 068/070 + 072/074, colonne 'Net' 4 (Exercice N-1). ATTENTION : ne recopie PAS les valeurs de l'exercice N. Si la colonne N-1 est vide, retourne null.",
+      "excel_cell": null,
+      "excel_sheet": "{company_name}",
+      "type": "string",
+      "format_hint": "nombre sans € ou null si premier exercice.",
+      "context_hint": "COLONNE EXERCICE N-1 uniquement (colonne de droite).",
+      "source_doc_name_variants": ["bilan", "comptes annuels", "etats financiers", "liasse fiscale", "2033"],
+      "source_dirs": ["2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers", "2. Audit/1. Opérateur/2. Eléments financiers"],
+      "hint_keywords": ["bilan", "comptes annuels", "liasse", "actif"]
+    },
+    {
+      "field_id": "bilan_tresorerie_n1",
+      "label": "Trésorerie / disponibilités (N-1)",
+      "question": "Quel est le montant des disponibilités pour l'EXERCICE PRÉCÉDENT (N-1) ? Dans le 2033-A, ligne 084/086, colonne 'Net' 4 (Exercice N-1). Ajouter VMP si présentes. ATTENTION : ne recopie PAS la valeur de l'exercice N. Si la colonne N-1 est vide, retourne null.",
+      "excel_cell": null,
+      "excel_sheet": "{company_name}",
+      "type": "string",
+      "format_hint": "nombre sans € ou null si premier exercice.",
+      "context_hint": "COLONNE EXERCICE N-1 uniquement (colonne de droite).",
+      "source_doc_name_variants": ["bilan", "comptes annuels", "etats financiers", "liasse fiscale", "2033"],
+      "source_dirs": ["2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers", "2. Audit/1. Opérateur/2. Eléments financiers"],
+      "hint_keywords": ["bilan", "comptes annuels", "liasse", "actif"]
+    },
+
+    {
+      "_comment": "--- PASSIF : Exercice N-1 (colonne 2 du passif 2033-A = Exercice N-1 NET) ---"
+    },
+    {
+      "field_id": "bilan_capital_social_n1",
+      "label": "Capital social (N-1)",
+      "question": "Quel est le capital social pour l'EXERCICE PRÉCÉDENT (N-1) ? Dans le 2033-A, ligne 120, colonne 'Exercice N-1 NET' 2. ATTENTION : ne recopie PAS la valeur de l'exercice N. Si la colonne N-1 est vide, retourne null.",
+      "excel_cell": null,
+      "excel_sheet": "{company_name}",
+      "type": "string",
+      "format_hint": "nombre sans € ou null si premier exercice.",
+      "context_hint": "COLONNE EXERCICE N-1 au passif (colonne 2, la plus à droite).",
+      "source_doc_name_variants": ["bilan", "comptes annuels", "etats financiers", "liasse fiscale", "2033"],
+      "source_dirs": ["2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers", "2. Audit/1. Opérateur/2. Eléments financiers"],
+      "hint_keywords": ["bilan", "comptes annuels", "liasse", "passif"]
+    },
+    {
+      "field_id": "bilan_resultat_exercice_n1",
+      "label": "Résultat de l'exercice (N-1)",
+      "question": "Quel est le résultat net pour l'EXERCICE PRÉCÉDENT (N-1) ? Dans le 2033-A, ligne 136, colonne 'Exercice N-1 NET' 2. Si perte, retourne négatif. ATTENTION : ne recopie PAS la valeur de l'exercice N. Si la colonne N-1 est vide, retourne null.",
+      "excel_cell": null,
+      "excel_sheet": "{company_name}",
+      "type": "string",
+      "format_hint": "nombre sans €, négatif si perte, ou null si premier exercice.",
+      "context_hint": "COLONNE EXERCICE N-1 au passif. Parenthèses = négatif.",
+      "source_doc_name_variants": ["bilan", "comptes annuels", "etats financiers", "liasse fiscale", "2033"],
+      "source_dirs": ["2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers", "2. Audit/1. Opérateur/2. Eléments financiers"],
+      "hint_keywords": ["bilan", "comptes annuels", "liasse", "passif", "résultat"]
+    },
+    {
+      "field_id": "bilan_capitaux_propres_n1",
+      "label": "Total capitaux propres (N-1)",
+      "question": "Quel est le total des capitaux propres pour l'EXERCICE PRÉCÉDENT (N-1) ? Dans le 2033-A, ligne 142, colonne 'Exercice N-1 NET' 2. ATTENTION : ne recopie PAS la valeur de l'exercice N. Si la colonne N-1 est vide, retourne null.",
+      "excel_cell": null,
+      "excel_sheet": "{company_name}",
+      "type": "string",
+      "format_hint": "nombre sans €, peut être négatif, ou null si premier exercice.",
+      "context_hint": "COLONNE EXERCICE N-1 au passif (colonne 2).",
+      "source_doc_name_variants": ["bilan", "comptes annuels", "etats financiers", "liasse fiscale", "2033"],
+      "source_dirs": ["2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers", "2. Audit/1. Opérateur/2. Eléments financiers"],
+      "hint_keywords": ["bilan", "comptes annuels", "liasse", "passif", "capitaux propres"]
+    },
+    {
+      "field_id": "bilan_dettes_financieres_n1",
+      "label": "Dettes financières diverses (N-1)",
+      "question": "Quel est le montant total des dettes financières pour l'EXERCICE PRÉCÉDENT (N-1) ? Dans le 2033-A, lignes 156 + 172, colonne 'Exercice N-1 NET' 2. Ne PAS inclure dettes fournisseurs ni dettes fiscales/sociales. ATTENTION : ne recopie PAS la valeur de l'exercice N. Si la colonne N-1 est vide, retourne null.",
+      "excel_cell": null,
+      "excel_sheet": "{company_name}",
+      "type": "string",
+      "format_hint": "nombre sans € ou null si premier exercice.",
+      "context_hint": "COLONNE EXERCICE N-1 au passif. Dettes financières = emprunts + CCA + dettes financières diverses.",
+      "source_doc_name_variants": ["bilan", "comptes annuels", "etats financiers", "liasse fiscale", "2033"],
+      "source_dirs": ["2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers", "2. Audit/1. Opérateur/2. Eléments financiers"],
+      "hint_keywords": ["bilan", "comptes annuels", "liasse", "passif", "dettes"]
+    },
+    {
+      "field_id": "bilan_comptes_courants_n1",
+      "label": "Comptes courants d'associés (N-1)",
+      "question": "Quel est le montant des comptes courants d'associés AU PASSIF pour l'EXERCICE PRÉCÉDENT (N-1) ? Cherche le renvoi CCA de l'exercice N-1 s'il est mentionné. ATTENTION : ne recopie PAS le montant CCA de l'exercice N. Si non disponible pour N-1, retourne null.",
+      "excel_cell": null,
+      "excel_sheet": "{company_name}",
+      "type": "string",
+      "format_hint": "nombre sans € ou null.",
+      "context_hint": "Le montant CCA N-1 n'est pas toujours détaillé dans le bilan (le renvoi 169 ne concerne souvent que N). Si indisponible, retourne null.",
+      "source_doc_name_variants": ["bilan", "comptes annuels", "etats financiers", "liasse fiscale", "2033"],
+      "source_dirs": ["2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers", "2. Audit/1. Opérateur/2. Eléments financiers"],
+      "hint_keywords": ["bilan", "comptes annuels", "liasse", "passif", "comptes courants"]
+    },
+    {
+      "field_id": "bilan_dettes_bancaires_n1",
+      "label": "Dettes bancaires (N-1)",
+      "question": "Quel est le montant des dettes bancaires pour l'EXERCICE PRÉCÉDENT (N-1) ? Cherche la ligne 'Emprunts et dettes assimilées' (156) colonne 'Exercice N-1 NET' 2. ATTENTION : ne recopie PAS la valeur de l'exercice N. Si la colonne N-1 est vide, retourne null.",
+      "excel_cell": null,
+      "excel_sheet": "{company_name}",
+      "type": "string",
+      "format_hint": "nombre sans € ou null si premier exercice.",
+      "context_hint": "COLONNE EXERCICE N-1 au passif.",
+      "source_doc_name_variants": ["bilan", "comptes annuels", "etats financiers", "liasse fiscale", "2033"],
+      "source_dirs": ["2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers", "2. Audit/1. Opérateur/2. Eléments financiers"],
+      "hint_keywords": ["bilan", "comptes annuels", "liasse", "passif", "dettes", "bancaire"]
+    },
+    {
+      "field_id": "bilan_chiffre_affaires_n1",
+      "label": "Chiffre d'affaires (N-1)",
+      "question": "Quel est le chiffre d'affaires pour l'EXERCICE PRÉCÉDENT (N-1) ? Dans le compte de résultat, cherche 'Montant net du chiffre d'affaires' dans la colonne Exercice N-1 (colonne de droite). ATTENTION : ne recopie PAS la valeur de l'exercice N. Si la colonne N-1 est vide ou absente, retourne null.",
+      "excel_cell": null,
+      "excel_sheet": "{company_name}",
+      "type": "string",
+      "format_hint": "nombre sans € ou null si premier exercice.",
+      "context_hint": "COLONNE EXERCICE N-1 du compte de résultat (colonne de droite). Le compte de résultat du 2033-B a aussi une colonne N-1.",
+      "source_doc_name_variants": ["bilan", "comptes annuels", "etats financiers", "liasse fiscale", "2033"],
+      "source_dirs": ["2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers", "2. Audit/1. Opérateur/2. Eléments financiers"],
+      "hint_keywords": ["bilan", "comptes annuels", "liasse", "résultat", "chiffre d'affaires"]
+    }
+  ]
+}
