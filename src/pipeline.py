@@ -49,12 +49,15 @@ PARENT_SIZE = 2000  # tokens max par parent
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
+LOG_DIR = ROOT_DIR / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s — %(levelname)s — %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(ROOT_DIR / "logs" / "pipeline.log", encoding="utf-8"),
+        logging.FileHandler(LOG_DIR / "pipeline.log", encoding="utf-8"),
     ],
 )
 logger = logging.getLogger(__name__)

@@ -179,68 +179,33 @@ if not DROPBOX_ROOT:
 
 st.caption(f"Racine détectée : `{DROPBOX_ROOT}`")
 
-if "dbx_path" not in st.session_state:
-    st.session_state.dbx_path = DROPBOX_ROOT
-if "dbx_entries" not in st.session_state:
-    st.session_state.dbx_entries = None  # (folders, files) or None = not loaded
+if "dbx_folders" not in st.session_state:
+    st.session_state.dbx_folders = []
 
-def _refresh_entries():
-    st.session_state.dbx_entries = _list_dropbox_entries(st.session_state.dbx_path)
+def _load_projects():
+    folders, _ = _list_dropbox_entries(DROPBOX_ROOT)
+    st.session_state.dbx_folders = folders
 
-def _navigate_to(path: str):
-    st.session_state.dbx_path = path
-    st.session_state.dbx_entries = None
+if not st.session_state.dbx_folders:
+    _load_projects()
 
-# Load entries on first visit or after navigation
-if st.session_state.dbx_entries is None:
-    _refresh_entries()
-
-folders, files = st.session_state.dbx_entries
-
-# Breadcrumb navigation
-current_path = st.session_state.dbx_path
-relative = current_path[len(DROPBOX_ROOT):].strip("/")
-breadcrumb_parts = [p for p in relative.split("/") if p]
-
-breadcrumb_cols = st.columns(len(breadcrumb_parts) + 2)
-with breadcrumb_cols[0]:
-    if st.button("RAIZERS - En audit", key="bc_root"):
-        _navigate_to(DROPBOX_ROOT)
-        st.rerun()
-for i, part in enumerate(breadcrumb_parts):
-    with breadcrumb_cols[i + 1]:
-        path_up_to = DROPBOX_ROOT + "/" + "/".join(breadcrumb_parts[: i + 1])
-        if st.button(f"/ {part}", key=f"bc_{i}"):
-            _navigate_to(path_up_to)
-            st.rerun()
-with breadcrumb_cols[-1]:
-    if st.button("Rafraichir", key="refresh"):
-        _refresh_entries()
+col1, col2 = st.columns([4, 1])
+with col2:
+    if st.button("Rafraichir"):
+        _load_projects()
         st.rerun()
 
-# Show folders (clickable to navigate into)
-if folders:
-    st.caption("Dossiers :")
-    folder_cols_per_row = 3
-    for row_start in range(0, len(folders), folder_cols_per_row):
-        row_folders = folders[row_start : row_start + folder_cols_per_row]
-        cols = st.columns(folder_cols_per_row)
-        for j, folder_name in enumerate(row_folders):
-            with cols[j]:
-                if st.button(f"📁 {folder_name}", key=f"folder_{row_start+j}", use_container_width=True):
-                    _navigate_to(f"{current_path}/{folder_name}")
-                    st.rerun()
-
-# Show files (info only)
-if files:
-    with st.expander(f"{len(files)} fichier(s) dans ce dossier"):
-        for fname in files:
-            st.text(f"  📄 {fname}")
-
-# Selection confirmation
-st.markdown("---")
-st.markdown(f"**Dossier sélectionné :** `{current_path}`")
-selected_path = current_path
+if st.session_state.dbx_folders:
+    with col1:
+        selected_project = st.selectbox(
+            "Projet à auditer",
+            st.session_state.dbx_folders,
+            label_visibility="collapsed",
+        )
+    selected_path = f"{DROPBOX_ROOT}/{selected_project}"
+else:
+    st.warning("Aucun dossier trouvé dans Dropbox.")
+    selected_path = ""
 
 # --- Options ---
 st.subheader("2. Options")
