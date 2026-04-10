@@ -12,6 +12,7 @@ import re
 import smtplib
 import sys
 import time
+import base64
 from datetime import datetime
 from email.message import EmailMessage
 from io import StringIO
@@ -29,6 +30,7 @@ configure_environment(ROOT_DIR)
 
 OUTPUT_DIR = ROOT_DIR / "output"
 LOGO_PATH = ROOT_DIR / "assets" / "raizers_logo.png"
+BACKGROUND_PATH = ROOT_DIR / "assets" / "background.jpg"
 HISTORY_PATH = OUTPUT_DIR / "audit_history.json"
 AUTH_USER_ENV = "APP_AUTH_USER"
 AUTH_PASS_ENV = "APP_AUTH_PASS"
@@ -205,6 +207,13 @@ def _render_audit_history() -> None:
         )
 
 
+def _load_background_data_url(path: Path) -> str:
+    if not path.exists():
+        return ""
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:image/jpeg;base64,{encoded}"
+
+
 class StreamlitLogHandler(logging.Handler):
     """Capture les logs dans un buffer pour affichage Streamlit."""
     def __init__(self):
@@ -225,54 +234,65 @@ class StreamlitLogHandler(logging.Handler):
 st.set_page_config(page_title="RAIZERS Audit", page_icon="📊", layout="centered")
 
 # --- Custom CSS ---
-st.markdown("""
+background_data_url = _load_background_data_url(BACKGROUND_PATH)
+
+st.markdown(f"""
 <style>
     /* Global */
-    .stApp {
-        background: #1d6db3;
-    }
+    .stApp {{
+        background:
+            linear-gradient(rgba(11, 58, 103, 0.56), rgba(17, 72, 123, 0.56)),
+            linear-gradient(rgba(8, 24, 42, 0.18), rgba(8, 24, 42, 0.18)),
+            url("{background_data_url}");
+        background-size: cover;
+        background-position: center center;
+        background-repeat: no-repeat;
+        background-attachment: fixed;
+    }}
 
     /* Header bar */
-    .main-header {
-        background: linear-gradient(135deg, #1d6db3 0%, #1B2D45 55%, #4DC8E8 150%);
+    .main-header {{
+        background: linear-gradient(135deg, rgba(29,109,179,0.72) 0%, rgba(27,45,69,0.82) 55%, rgba(77,200,232,0.55) 150%);
         border-bottom: 3px solid #4DC8E8;
         padding: 2.5rem 2rem 2rem;
         margin: -1rem -1rem 2rem -1rem;
         text-align: center;
-    }
-    .main-header h1 {
+        backdrop-filter: blur(2px);
+    }}
+    .main-header h1 {{
         color: #FFFFFF !important;
         font-size: 2.4rem !important;
         font-weight: 700 !important;
         margin: 0 !important;
         letter-spacing: 2px;
-    }
-    .main-header .accent {
+    }}
+    .main-header .accent {{
         color: #4DC8E8;
-    }
-    .main-header p {
+    }}
+    .main-header p {{
         color: rgba(255,255,255,0.6);
         font-size: 0.95rem;
         margin: 0.5rem 0 0 0;
         letter-spacing: 3px;
         text-transform: uppercase;
-    }
+    }}
 
     /* Cards */
-    .step-card {
-        background: #1B2D45;
+    .step-card {{
+        background: rgba(27,45,69,0.90);
         border: 1px solid rgba(77,200,232,0.15);
         border-radius: 12px;
         padding: 1.2rem 1.5rem;
         margin-bottom: 0.8rem;
-    }
-    .step-card h3 {
+        backdrop-filter: blur(2px);
+    }}
+    .step-card h3 {{
         font-size: 1rem;
         color: #FFFFFF;
         margin: 0;
         font-weight: 600;
-    }
-    .step-number {
+    }}
+    .step-number {{
         display: inline-block;
         background: #4DC8E8;
         color: #0D1B2A;
@@ -285,33 +305,33 @@ st.markdown("""
         font-weight: 700;
         margin-right: 8px;
         vertical-align: middle;
-    }
+    }}
 
     /* Result badges */
-    .result-ok {
+    .result-ok {{
         background: rgba(39,174,96,0.12);
         border-left: 4px solid #27AE60;
         color: #A8F0C8;
         padding: 0.6rem 1rem;
         border-radius: 0 8px 8px 0;
         margin: 0.4rem 0;
-    }
-    .result-err {
+    }}
+    .result-err {{
         background: rgba(231,76,60,0.12);
         border-left: 4px solid #E74C3C;
         color: #F5B7B1;
         padding: 0.6rem 1rem;
         border-radius: 0 8px 8px 0;
         margin: 0.4rem 0;
-    }
+    }}
 
     /* Hide default streamlit header/footer */
-    #MainMenu {visibility: hidden;}
-    header {visibility: hidden;}
-    footer {visibility: hidden;}
+    #MainMenu {{visibility: hidden;}}
+    header {{visibility: hidden;}}
+    footer {{visibility: hidden;}}
 
     /* Button styling */
-    .stButton > button[kind="primary"] {
+    .stButton > button[kind="primary"] {{
         background: linear-gradient(135deg, #4DC8E8 0%, #2A9FBF 100%);
         color: #0D1B2A !important;
         border: none;
@@ -321,44 +341,45 @@ st.markdown("""
         font-size: 1rem;
         letter-spacing: 0.3px;
         transition: transform 0.15s, box-shadow 0.15s;
-    }
-    .stButton > button[kind="primary"]:hover {
+    }}
+    .stButton > button[kind="primary"]:hover {{
         transform: translateY(-1px);
         box-shadow: 0 4px 16px rgba(77,200,232,0.35);
-    }
+    }}
 
     /* Selectbox & inputs */
-    .stSelectbox > div > div {
+    .stSelectbox > div > div {{
         border-radius: 10px;
-        background: #1B2D45;
-    }
-    .stTextInput > div > div > input {
-        background: #1B2D45;
+        background: rgba(27,45,69,0.92);
+    }}
+    .stTextInput > div > div > input {{
+        background: rgba(27,45,69,0.92);
         border-radius: 10px;
-    }
+    }}
 
     /* Login page */
-    .login-container {
+    .login-container {{
         max-width: 520px;
         margin: 2rem auto 0 auto;
-        background: #1B2D45;
+        background: rgba(27,45,69,0.90);
         border: 1px solid rgba(77,200,232,0.2);
         border-radius: 16px;
         padding: 2.5rem 2rem;
         text-align: center;
-        box-shadow: 0 18px 45px rgba(13,27,42,0.18);
-    }
-    .login-container h2 {
+        box-shadow: 0 18px 45px rgba(13,27,42,0.28);
+        backdrop-filter: blur(3px);
+    }}
+    .login-container h2 {{
         color: #FFFFFF;
         font-size: 1.6rem;
         margin-bottom: 0.3rem;
-    }
-    .login-container .subtitle {
+    }}
+    .login-container .subtitle {{
         color: rgba(255,255,255,0.5);
         font-size: 0.85rem;
         margin-bottom: 1.5rem;
-    }
-    .login-error {
+    }}
+    .login-error {{
         background: rgba(231,76,60,0.15);
         border: 1px solid rgba(231,76,60,0.3);
         color: #F5B7B1;
@@ -366,22 +387,23 @@ st.markdown("""
         border-radius: 8px;
         margin-top: 0.5rem;
         font-size: 0.9rem;
-    }
-    .top-logo {
+    }}
+    .top-logo {{
         margin: -0.25rem 0 1.5rem 0;
-    }
-    .history-card {
+    }}
+    .history-card {{
         background: rgba(27,45,69,0.92);
         border: 1px solid rgba(77,200,232,0.2);
         border-radius: 12px;
         padding: 0.85rem 1rem;
         color: #FFFFFF;
         margin-bottom: 0.7rem;
-    }
-    .history-card span {
+        backdrop-filter: blur(2px);
+    }}
+    .history-card span {{
         color: rgba(255,255,255,0.72);
         font-size: 0.88rem;
-    }
+    }}
 </style>
 """, unsafe_allow_html=True)
 
