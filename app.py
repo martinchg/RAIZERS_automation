@@ -253,12 +253,18 @@ def _load_background_data_url(path: Path) -> str:
 
 class StreamlitLogHandler(logging.Handler):
     """Capture les logs dans un buffer pour affichage Streamlit."""
-    def __init__(self):
+    def __init__(self, placeholder=None, max_live_lines: int = 80):
         super().__init__()
         self.buffer = StringIO()
+        self.placeholder = placeholder
+        self.max_live_lines = max_live_lines
 
     def emit(self, record):
-        self.buffer.write(self.format(record) + "\n")
+        line = self.format(record)
+        self.buffer.write(line + "\n")
+        if self.placeholder is not None:
+            lines = self.buffer.getvalue().splitlines()
+            self.placeholder.code("\n".join(lines[-self.max_live_lines:]), language="text")
 
     def get_logs(self) -> str:
         return self.buffer.getvalue()
@@ -632,7 +638,9 @@ if st.button("Lancer l'audit", type="primary", use_container_width=True):
     completed_steps = 0
 
     # Setup logging capture
-    log_handler = StreamlitLogHandler()
+    live_logs_placeholder = st.empty()
+    live_logs_placeholder.caption("Progression interne du pipeline...")
+    log_handler = StreamlitLogHandler(placeholder=live_logs_placeholder)
     log_handler.setFormatter(logging.Formatter("%(asctime)s — %(message)s", datefmt="%H:%M:%S"))
     root_logger = logging.getLogger()
     root_logger.addHandler(log_handler)
@@ -687,8 +695,19 @@ if st.button("Lancer l'audit", type="primary", use_container_width=True):
                 summary = data.get("summary", {})
                 answered = summary.get("answered", 0)
                 total = summary.get("total", 0)
-                results_summary["extract"] = f"{answered}/{total} champs"
-                st.write(f"Extraction : {answered}/{total} champs remplis")
+                asked_globals = summary.get("asked_global_fields")
+                asked_person = summary.get("asked_person_fields")
+                asked_company = summary.get("asked_company_fields")
+                if all(isinstance(v, int) for v in (asked_globals, asked_person, asked_company)):
+                    results_summary["extract"] = (
+                        f"{answered}/{total} champs "
+                        f"(global {summary.get('answered_global_fields', 0)}/{asked_globals}, "
+                        f"personne {summary.get('answered_person_fields', 0)}/{asked_person}, "
+                        f"société {summary.get('answered_company_fields', 0)}/{asked_company})"
+                    )
+                else:
+                    results_summary["extract"] = f"{answered}/{total} champs"
+                st.write(f"Extraction : {results_summary['extract']}")
             else:
                 results_summary["extract"] = "OK"
         except Exception as e:

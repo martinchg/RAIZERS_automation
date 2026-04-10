@@ -50,6 +50,7 @@ QUESTIONS_PATH = ROOT_DIR / "config" / "questions.json"
 SUPPORTED_EXT = {".pdf", ".docx", ".txt", ".pptx", ".xlsx", ".xls", ".md", ".ppt"}
 PARENT_SIZE = 2000
 DEFAULT_DOC_TIMEOUT_SECONDS = int(os.environ.get("PIPELINE_DOC_TIMEOUT_SECONDS", "90"))
+ENABLE_PIPELINE_PREFILTER = os.environ.get("PIPELINE_ENABLE_PREFILTER", "").strip().lower() in {"1", "true", "yes", "on"}
 
 AUDIT_PATTERNS = ["audit", "*audit", "audit*", "*audit*"]
 OPERATEUR_PATTERNS = ["operateur", "*operateur", "operateur*", "*operateur*"]
@@ -695,11 +696,18 @@ def run(project_path: str, selected_audit_folder: Optional[str] = None):
     if selected_audit_folder_name is None:
         selected_audit_folder_name = resolved_selected_audit_folder
 
-    all_files = prefilter_files_for_extraction(
-        scoped_files,
-        project_local_root,
-        selected_audit_folder=selected_audit_folder_name,
-    )
+    all_files = scoped_files
+    if ENABLE_PIPELINE_PREFILTER:
+        all_files = prefilter_files_for_extraction(
+            scoped_files,
+            project_local_root,
+            selected_audit_folder=selected_audit_folder_name,
+        )
+    else:
+        logger.info(
+            "  🎯 Préfiltrage pipeline désactivé : %s fichier(s) gardé(s) dans le scope",
+            len(all_files),
+        )
 
     if not all_files:
         logger.warning("Aucun fichier pertinent après filtrage. Fin.")
@@ -713,10 +721,19 @@ def run(project_path: str, selected_audit_folder: Optional[str] = None):
     timed_out_files = 0
     doc_timeout_seconds = DEFAULT_DOC_TIMEOUT_SECONDS
 
-    for file_path in tqdm(all_files, desc="Processing", unit="file"):
+    total_files_to_process = len(all_files)
+
+    for index, file_path in enumerate(tqdm(all_files, desc="Processing", unit="file"), start=1):
         source_path = compute_source_path(file_path, project_local_root)
         document_id = make_document_id(project_id, source_path)
         started = time.perf_counter()
+
+        logger.info(
+            "  🔄 [%s/%s] %s",
+            index,
+            total_files_to_process,
+            source_path,
+        )
 
         try:
             with _document_time_limit(doc_timeout_seconds):
@@ -764,8 +781,13 @@ def run(project_path: str, selected_audit_folder: Optional[str] = None):
                 "processing_seconds": elapsed,
             })
 
-            if elapsed >= 10:
-                logger.info(f"  ⏱️  {elapsed:.2f}s — {source_path}")
+            logger.info(
+                "    ✅ %s parent(s), %s ignoré(s), %s tok, %.2fs",
+                len(parents),
+                skipped,
+                doc_tokens,
+                elapsed,
+            )
 
         except DocumentProcessingTimeoutError as e:
             timed_out_files += 1

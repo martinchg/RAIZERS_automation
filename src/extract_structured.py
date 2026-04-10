@@ -517,6 +517,10 @@ def run(project_id: str):
 
     # Résultats globaux : field_id -> valeur (première réponse non-null gagne)
     results: Dict[str, Optional[str]] = {f["field_id"]: None for f in global_fields}
+    global_field_ids = {f["field_id"] for f in global_fields}
+    asked_global_ids: set[str] = set()
+    asked_person_keys: set[str] = set()
+    asked_company_keys: set[str] = set()
     # Per-person : regrouper par dossier parent (1 onglet par dossier, pas par doc)
     # folder_name -> suffix index (__0, __1, ...)
     person_folder_map: Dict[str, int] = {}
@@ -579,6 +583,20 @@ def run(project_id: str):
         if not unanswered_global and not matched_person and not matched_company:
             continue
 
+        asked_global_ids.update(f["field_id"] for f in unanswered_global)
+
+        person_suffix = None
+        if matched_person:
+            folder_key = _normalize(person_folder)
+            if folder_key not in person_folder_map:
+                person_folder_map[folder_key] = person_counter
+                person_folder_display[folder_key] = person_folder
+                person_counter += 1
+                logger.info(f"    👤 Nouveau dossier personne : {person_folder} → __"
+                           f"{person_folder_map[folder_key]}")
+            person_suffix = f"__{person_folder_map[folder_key]}"
+            asked_person_keys.update(f["field_id"] + person_suffix for f in matched_person)
+
         # Quelles questions poser ?
         questions_to_ask = unanswered_global + matched_person + matched_company
 
@@ -632,17 +650,8 @@ def run(project_id: str):
 
         # --- Stocker les champs per-person avec suffixe __N ---
         # Regrouper par sous-dossier 3. RH : tous les docs d'un même dossier → même suffixe
-        if matched_person:
-            folder_key = _normalize(person_folder)
-
-            if folder_key not in person_folder_map:
-                person_folder_map[folder_key] = person_counter
-                person_folder_display[folder_key] = person_folder
-                person_counter += 1
-                logger.info(f"    👤 Nouveau dossier personne : {person_folder} → __"
-                           f"{person_folder_map[folder_key]}")
-
-            suffix = f"__{person_folder_map[folder_key]}"
+        if matched_person and person_suffix:
+            suffix = person_suffix
             for f in matched_person:
                 fid = f["field_id"]
                 value = answers.get(fid)
@@ -676,6 +685,7 @@ def run(project_id: str):
 
             if company_key:
                 suffix = f"__{company_name_map[company_key]}"
+                asked_company_keys.update(f["field_id"] + suffix for f in matched_company)
                 for f in matched_company:
                     fid = f["field_id"]
                     value = answers.get(fid)
@@ -704,8 +714,11 @@ def run(project_id: str):
         time.sleep(2)
 
     # --- Résumé ---
-    answered = sum(1 for v in results.values() if v is not None)
-    total = len(results)
+    answered_global = sum(1 for field_id in global_field_ids if results.get(field_id) is not None)
+    answered_person = sum(1 for key in asked_person_keys if results.get(key) is not None)
+    answered_company = sum(1 for key in asked_company_keys if results.get(key) is not None)
+    answered = answered_global + answered_person + answered_company
+    total = len(asked_global_ids) + len(asked_person_keys) + len(asked_company_keys)
     logger.info("=" * 60)
     logger.info(
         f"Extraction terminée : {answered}/{total} champs remplis "
@@ -735,6 +748,15 @@ def run(project_id: str):
             "summary": {
                 "answered": answered,
                 "total": total,
+                "configured_global_fields": len(global_fields),
+                "configured_person_fields": len(person_fields),
+                "configured_company_fields": len(company_fields),
+                "answered_global_fields": answered_global,
+                "answered_person_fields": answered_person,
+                "answered_company_fields": answered_company,
+                "asked_global_fields": len(asked_global_ids),
+                "asked_person_fields": len(asked_person_keys),
+                "asked_company_fields": len(asked_company_keys),
                 "persons": person_counter,
                 "companies": company_counter,
             },
