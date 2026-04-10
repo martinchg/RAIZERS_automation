@@ -24,7 +24,10 @@ configure_environment(ROOT_DIR)
 
 from tqdm import tqdm
 
-from dropbox_client import get_client, list_subfolders, sync_folders
+import dropbox
+from dropbox.files import FolderMetadata
+
+from dropbox_client import get_client, sync_folders
 from ingestion import extract
 from chunking import build_parents, make_document_id
 from normalization import (
@@ -349,10 +352,22 @@ def prefilter_files_for_extraction(
 
 def _folder_debug_listing(dbx, path: str) -> List[str]:
     try:
-        return [f"{child.name} | {child.path_display}" for child in list_subfolders(dbx, path)]
+        return [f"{child.name} | {child.path_display}" for child in _list_subfolders(dbx, path)]
     except Exception as exc:
         return [f"<erreur listing {path}: {exc}>"]
 
+
+def _list_subfolders(dbx: dropbox.Dropbox, dropbox_folder: str) -> List[FolderMetadata]:
+    folders: List[FolderMetadata] = []
+    result = dbx.files_list_folder(dropbox_folder, recursive=False)
+    while True:
+        for entry in result.entries:
+            if isinstance(entry, FolderMetadata):
+                folders.append(entry)
+        if not result.has_more:
+            break
+        result = dbx.files_list_folder_continue(result.cursor)
+    return sorted(folders, key=lambda folder: folder.name.lower())
 
 
 def _find_audit_base(project_local_root: Path) -> Optional[Path]:
@@ -392,7 +407,7 @@ def _find_dropbox_folder_by_patterns(
     max_depth: int = 1,
 ) -> Optional[str]:
     def _walk(path: str, depth: int) -> Optional[str]:
-        children = list_subfolders(dbx, path)
+        children = _list_subfolders(dbx, path)
         logger.info(
             "[Dropbox scan] path=%r depth=%s children=%s",
             path,
@@ -422,7 +437,7 @@ def _find_dropbox_folder_by_patterns(
 
 def _list_available_audit_folders_dropbox(dbx, audit_path: str) -> List[str]:
     folders = []
-    for folder in list_subfolders(dbx, audit_path):
+    for folder in _list_subfolders(dbx, audit_path):
         if not _matches_any_pattern(folder.name, OPERATEUR_PATTERNS):
             folders.append(folder.name)
     return folders
