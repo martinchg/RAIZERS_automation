@@ -36,6 +36,8 @@ LOGO_PATH = ROOT_DIR / "assets" / "raizers_logo.png"
 BACKGROUND_PATH = ROOT_DIR / "assets" / "background.jpg"
 HISTORY_PATH = OUTPUT_DIR / "audit_history.json"
 AUTH_USER_ENV = "APP_AUTH_USER"
+AUDIT_PATTERNS = ["audit", "*audit", "audit*", "*audit*"]
+OPERATEUR_PATTERNS = ["operateur", "*operateur", "operateur*", "*operateur*"]
 AUTH_PASS_ENV = "APP_AUTH_PASS"
 
 # ---------------------------------------------------------------------------
@@ -118,7 +120,7 @@ def _list_dropbox_entries(path: str) -> tuple[list[str], list[str]]:
         return [], []
 
 
-def _find_audit_folder_dropbox(project_path: str, max_depth: int = 3) -> str | None:
+def _find_audit_folder_dropbox(project_path: str, max_depth: int = 6) -> str | None:
     """Trouve le dossier 'Audit' dans un projet Dropbox (matching flexible).
 
     Retourne le chemin Dropbox complet du dossier, ou None.
@@ -126,7 +128,7 @@ def _find_audit_folder_dropbox(project_path: str, max_depth: int = 3) -> str | N
     def _walk(path: str, depth: int) -> str | None:
         folders, _ = _list_dropbox_entries(path)
         for name in folders:
-            if matches_pattern(name, "*audit"):
+            if any(matches_pattern(name, pattern) for pattern in AUDIT_PATTERNS):
                 return f"{path}/{name}"
         if depth < max_depth:
             for name in folders:
@@ -140,11 +142,14 @@ def _find_audit_folder_dropbox(project_path: str, max_depth: int = 3) -> str | N
 
 def _list_audit_subfolders_dropbox(project_path: str) -> list[str]:
     """Liste les sous-dossiers du dossier Audit sélectionnables (hors Opérateur)."""
-    audit_path = _find_audit_folder_dropbox(project_path)
+    audit_path = _find_audit_folder_dropbox(project_path, max_depth=6)
     if not audit_path:
         return []
     folders, _ = _list_dropbox_entries(audit_path)
-    return [f for f in folders if not matches_pattern(f, "*operateur")]
+    return [
+        f for f in folders
+        if not any(matches_pattern(f, pattern) for pattern in OPERATEUR_PATTERNS)
+    ]
 
 
 def _send_email(to: str, subject: str, body: str, attachment_path: Path | None = None):
