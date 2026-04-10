@@ -1,5 +1,6 @@
 import argparse
 import contextlib
+import importlib
 import json
 import logging
 import os
@@ -27,7 +28,7 @@ from tqdm import tqdm
 import dropbox
 from dropbox.files import FolderMetadata
 
-from dropbox_client import get_client, sync_folders
+import dropbox_client as dropbox_client_module
 from ingestion import extract
 from chunking import build_parents, make_document_id
 from normalization import (
@@ -370,6 +371,49 @@ def _list_subfolders(dbx: dropbox.Dropbox, dropbox_folder: str) -> List[FolderMe
     return sorted(folders, key=lambda folder: folder.name.lower())
 
 
+def _get_dropbox_client() -> dropbox.Dropbox:
+    module = importlib.reload(dropbox_client_module)
+    return module.get_client()
+
+
+def _sync_dropbox_folders(
+    dropbox_folders: List[str],
+    local_dir: str | Path,
+    *,
+    recursive: bool = True,
+    dbx: dropbox.Dropbox | None = None,
+) -> List[Path]:
+    module = importlib.reload(dropbox_client_module)
+
+    sync_many = getattr(module, "sync_folders", None)
+    if callable(sync_many):
+        return sync_many(
+            dropbox_folders=dropbox_folders,
+            local_dir=local_dir,
+            recursive=recursive,
+            dbx=dbx,
+        )
+
+    sync_one = getattr(module, "sync_folder", None)
+    if callable(sync_one):
+        downloaded: List[Path] = []
+        for folder in dropbox_folders:
+            downloaded.extend(sync_one(folder, local_dir=local_dir, recursive=recursive))
+        return downloaded
+
+    list_files = getattr(module, "list_files", None)
+    download_files = getattr(module, "download_files", None)
+    get_client = getattr(module, "get_client", None)
+    if callable(list_files) and callable(download_files) and callable(get_client):
+        client = dbx or get_client()
+        all_files = []
+        for folder in dropbox_folders:
+            all_files.extend(list_files(client, folder, recursive=recursive))
+        return download_files(client, all_files, local_dir)
+
+    raise ImportError("dropbox_client ne fournit ni sync_folders, ni sync_folder, ni list_files/download_files")
+
+
 def _find_audit_base(project_local_root: Path) -> Optional[Path]:
     for pattern in AUDIT_PATTERNS:
         found = find_folder_by_canonical(
@@ -617,7 +661,7 @@ def run(project_path: str, selected_audit_folder: Optional[str] = None):
     logger.info("=" * 60)
 
     logger.info("ÉTAPE 1 — Sync Dropbox")
-    dbx = get_client()
+    dbx = _get_dropbox_client()
     sync_targets, resolved_selected_audit_folder = _resolve_dropbox_sync_targets(
         dbx,
         project_path,
@@ -627,7 +671,7 @@ def run(project_path: str, selected_audit_folder: Optional[str] = None):
         logger.warning("Aucun dossier Dropbox cible à synchroniser. Fin.")
         return
 
-    downloaded = sync_folders(
+    downloaded = _sync_dropbox_folders(
         dropbox_folders=sync_targets,
         local_dir=str(LOCAL_CACHE),
         dbx=dbx,
