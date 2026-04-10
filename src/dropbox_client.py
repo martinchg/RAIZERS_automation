@@ -9,7 +9,7 @@ Nécessite : pip install dropbox python-dotenv
 import logging
 import os
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 import dropbox
 from dropbox.files import FileMetadata, FolderMetadata
@@ -77,6 +77,26 @@ def list_files(dbx: dropbox.Dropbox,
     return files
 
 
+def list_subfolders(dbx: dropbox.Dropbox, dropbox_folder: str) -> List[FolderMetadata]:
+    """
+    Liste les sous-dossiers directs d'un dossier Dropbox.
+    """
+    folders: List[FolderMetadata] = []
+    try:
+        result = dbx.files_list_folder(dropbox_folder, recursive=False)
+        while True:
+            for entry in result.entries:
+                if isinstance(entry, FolderMetadata):
+                    folders.append(entry)
+            if not result.has_more:
+                break
+            result = dbx.files_list_folder_continue(result.cursor)
+    except dropbox.exceptions.ApiError as e:
+        logger.error(f"Erreur Dropbox API (list_subfolders) : {e}")
+        raise
+    return sorted(folders, key=lambda folder: folder.name.lower())
+
+
 def download_files(dbx: dropbox.Dropbox,
                    files: List[FileMetadata],
                    local_dir: str | Path) -> List[Path]:
@@ -116,3 +136,22 @@ def sync_folder(dropbox_folder: str,
     dbx = get_client()
     files = list_files(dbx, dropbox_folder, recursive=recursive)
     return download_files(dbx, files, local_dir)
+
+
+def sync_folders(dropbox_folders: List[str],
+                 local_dir: str | Path = "Dropbox_exctraction",
+                 recursive: bool = True,
+                 dbx: dropbox.Dropbox | None = None) -> List[Path]:
+    """
+    Télécharge plusieurs dossiers Dropbox ciblés dans un même cache local.
+    """
+    if not dropbox_folders:
+        return []
+
+    client = dbx or get_client()
+    all_files: List[FileMetadata] = []
+
+    for folder in dropbox_folders:
+        all_files.extend(list_files(client, folder, recursive=recursive))
+
+    return download_files(client, all_files, local_dir)

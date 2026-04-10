@@ -5,7 +5,6 @@ import os
 import re
 import sys
 import time
-import unicodedata
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -13,6 +12,10 @@ _SRC_DIR = Path(__file__).parent.resolve()
 if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
+from normalization import (
+    canonical_name,
+    is_archived_path,
+)
 from runtime_config import configure_environment
 
 ROOT_DIR = _SRC_DIR.parent.resolve()
@@ -73,42 +76,42 @@ def _get_llm_client():
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-def _normalize(text: str) -> str:
-    text = (text or "").strip().lower()
-    text = unicodedata.normalize("NFD", text)
-    text = "".join(c for c in text if unicodedata.category(c) != "Mn")
-    text = text.replace("_", " ").replace("-", " ")
-    text = re.sub(r"\s+", " ", text)
-    return text
+# Rétro-compat : ancienne API interne toujours alias vers la version partagée.
+_normalize = canonical_name
 
 
 def _normalize_identity_part(text: str) -> str:
-    return re.sub(r"[^a-z0-9]", "", _normalize(text))
+    return re.sub(r"[^a-z0-9]", "", canonical_name(text))
 
 
 def _is_old_source_path(source_path: str) -> bool:
-    parts = [p.strip().lower() for p in source_path.replace("\\", "/").split("/")]
-    return any(part in {"old", ".old", "x - old"} for part in parts)
+    return is_archived_path(source_path)
+
+
+_RH_CANON_ALIASES = {"rh", "ressources humaines"}
 
 
 def _extract_person_folder_from_source_path(source_path: str) -> Optional[str]:
-    if not source_path or _is_old_source_path(source_path):
+    """Nom du sous-dossier personne sous RH. Matching flexible sur le libellé RH."""
+    if not source_path or is_archived_path(source_path):
         return None
 
     raw_parts = [p for p in source_path.replace("\\", "/").split("/") if p]
-    normalized_parts = [_normalize(p) for p in raw_parts]
+    canon_parts = [canonical_name(p) for p in raw_parts]
 
-    try:
-        idx = normalized_parts.index(_normalize("3. RH"))
-    except ValueError:
+    rh_idx = next(
+        (i for i, p in enumerate(canon_parts) if p in _RH_CANON_ALIASES),
+        None,
+    )
+    if rh_idx is None:
         return None
 
-    # il faut un sous-dossier de 3. RH + un fichier dedans
-    if idx + 1 >= len(raw_parts) - 1:
+    # Il faut un sous-dossier de RH + un fichier dedans
+    if rh_idx + 1 >= len(raw_parts) - 1:
         return None
 
-    candidate = raw_parts[idx + 1]
-    if _is_old_source_path(candidate):
+    candidate = raw_parts[rh_idx + 1]
+    if is_archived_path(candidate):
         return None
     return candidate
 

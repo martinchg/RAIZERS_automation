@@ -4,7 +4,7 @@
 
 Automatiser l'analyse de dossiers d'audit Dropbox : extraction documentaire (PDF, DOCX, XLSX…), extraction LLM structurée, enrichissement Pappers (mandats/sociétés), et génération de rapport Excel.
 
-## Commandes
+## Commandes CLI
 
 Les 4 étapes sont indépendantes et se lancent dans l'ordre :
 
@@ -12,9 +12,25 @@ Les 4 étapes sont indépendantes et se lancent dans l'ordre :
 
 ```bash
 python run.py pipeline --project "/RAIZERS - En audit/NOM_DU_PROJET"
+python run.py pipeline --project "/RAIZERS - En audit/SIGNATURE" --audit-folder "3. Opération - Rue de la Loge"
 ```
 
-Synchronise le dossier Dropbox, extrait le texte de tous les documents, et génère les chunks dans `output/<project_id>/`.
+Le pipeline :
+- synchronise uniquement le dossier `Opérateur` et le sous-dossier d'audit sélectionné ;
+- ignore les chemins archivés (`old`, `.old`, `archive`, etc.) ;
+- applique un préfiltrage métier avant extraction/chunking ;
+- génère les documents chunkés dans `output/<project_id>/`.
+
+Option :
+- `--audit-folder` : nom exact du sous-dossier d'audit à inclure en plus de `1. Opérateur`.
+
+Exclusion manuelle optionnelle :
+
+```bash
+PIPELINE_EXCLUDE_PATTERNS="reporting,q&a,constat" python run.py pipeline --project "/RAIZERS - En audit/SIGNATURE" --audit-folder "3. Opération - Rue de la Loge"
+```
+
+Les patterns sont comparés de façon souple sur le nom de fichier et le `source_path`.
 
 ### 2. Extract — Extraction structurée via LLM
 
@@ -40,6 +56,29 @@ python run.py fill --results output/raizers-en-audit-signature/extraction_result
 
 Génère `rapport.xlsx` avec 3 onglets (Opération, Patrimoine, Mandats). Charge automatiquement `mandats_results.json` s'il est présent dans le même dossier.
 
+Option utile :
+
+```bash
+python run.py fill \
+  --results output/raizers-en-audit-signature/extraction_results.json \
+  --questions config/questions.json \
+  --output-dir output/raizers-en-audit-signature
+```
+
+## Lancement Streamlit
+
+```bash
+streamlit run app.py
+```
+
+L'application Streamlit orchestre le même flux :
+- sélection du projet Dropbox ;
+- sélection d'un sous-dossier d'audit ;
+- pipeline ;
+- extraction LLM ;
+- mandats Pappers ;
+- génération Excel.
+
 ## Structure de sortie
 
 ```bash
@@ -51,6 +90,12 @@ output/<project_id>/
 ├── mandats_debug_recherche.json   # Debug Pappers (audit trail)
 └── rapport.xlsx                   # Rapport Excel final
 ```
+
+Champs utiles dans `manifest.json` :
+- `selected_audit_folder` : sous-dossier d'audit retenu ;
+- `stats.files_found` : fichiers supportés trouvés dans le cache local ;
+- `stats.files_in_scope` : fichiers dans le périmètre `Opérateur` + sous-dossier d'audit ;
+- `stats.files_processed` : fichiers réellement extraits/chunkés.
 
 ## Variables d'environnement requises
 

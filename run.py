@@ -3,7 +3,7 @@
 Point d'entrée unique — RAIZERS Automation.
 
 Usage :
-    python run.py pipeline  --project "/RAIZERS - En audit/SIGNATURE"
+    python run.py pipeline  --project "/RAIZERS - En audit/SIGNATURE" --audit-folder "3. Opération - Rue de la Loge"
     python run.py extract   --project raizers-en-audit-signature
     python run.py mandats   --project raizers-en-audit-signature
     python run.py fill      --results output/.../extraction_results.json
@@ -31,6 +31,11 @@ def main():
     p1 = sub.add_parser("pipeline", help="Sync Dropbox + extraction texte + chunking")
     p1.add_argument("--project", "-p", required=True,
                      help='Chemin Dropbox (ex: "/RAIZERS - En audit/SIGNATURE")')
+    p1.add_argument(
+        "--audit-folder",
+        default=None,
+        help="Nom du dossier d'audit à inclure en plus de '1. Opérateur'",
+    )
 
     # --- extract : LLM extraction ---
     p2 = sub.add_parser("extract", help="Extraction structurée via LLM")
@@ -50,7 +55,7 @@ def main():
 
     if args.command == "pipeline":
         from pipeline import run
-        run(args.project)
+        run(args.project, selected_audit_folder=args.audit_folder)
 
     elif args.command == "extract":
         from extract_structured import run

@@ -1,8 +1,8 @@
 {
   "_description": "Champs à extraire des documents projet pour remplir le tableau Excel Book1.xlsx",
   "_notes": [
-    "hint_keywords = mots-clés à chercher dans le filename/source_path pour matcher le document",
-    "source_dirs = dossiers sources obligatoires (le doc DOIT être dans un de ces dossiers). Supporte {latest_folder} = dernier dossier numéroté dans 2. Audit/ (résolu à runtime depuis le manifest).",
+    "hint_keywords = mots-clés à chercher dans le filename/source_path pour matcher le document (matching canonique : casse/accents/préfixes numériques ignorés).",
+    "source_dirs = dossiers sources acceptés (le doc DOIT avoir sa source_path contenant l'un de ces dossiers comme sous-séquence de segments). Matching canonique tolérant : '*Audit', 'Audit 1', 'audit' s'équivalent. Les préfixes numériques ('0. ', '1. ', 'X. ') sont ignorés. Supporte {selected_audit_folder} = dossier d'audit choisi (résolu à runtime depuis le manifest).",
     "source_doc_name = nom du document source (sans chemin complet). Permet de matcher par nom de fichier seul.",
     "context_hint = contexte métier envoyé au LLM pour l'aider à distinguer les infos",
     "excel_sheet = nom de l'onglet Excel. Pour les champs patrimoine, '{person_name}' = placeholder, le pipeline crée un onglet par personne.",
@@ -19,7 +19,7 @@
       "format_hint": "9 chiffres avec espaces (ex: 123 456 789)",
       "context_hint": "C'est la société ÉMETTRICE des obligations, celle qui emprunte via Raizers. C'est celle qui figure dans 'Identification de la personne morale' du fichier Kbis, ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'.",
       "source_dirs": [
-        "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse"
+        "*Audit/*Opérateur/*Eléments juridiques/Société Emprunteuse"
       ],
       "hint_keywords": [
         "kbis",
@@ -37,8 +37,7 @@
       "format_hint": null,
       "context_hint": "La ville du RCS est celle du tribunal de commerce où la société emprunteuse est enregistrée. C'est celle qui figure dans identification de la personne morale du fichier Kbis, ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'.",
       "source_dirs": [
-        "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse",
-        "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse"
+        "*Audit/*Opérateur/*Eléments juridiques/Société Emprunteuse"
       ],
       "hint_keywords": [
         "kbis",
@@ -55,8 +54,7 @@
       "format_hint": "format JJ/MM/AAAA",
       "context_hint": "Date d'immatriculation au RCS de la société emprunteuse. C'est celle qui figure dans identification de la personne morale du fichier Kbis, ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'.",
       "source_dirs": [
-        "2. Audit/1. Opérateur/ 1. Eléments juridiques/ Société Emprunteuse",
-        "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse"
+        "*Audit/*Opérateur/*Eléments juridiques/Société Emprunteuse"
       ],
       "hint_keywords": [
         "kbis"
@@ -72,8 +70,7 @@
       "format_hint": null,
       "context_hint": "Nom officiel de la société emprunteuse (émettrice des obligations). C'est celle qui figure dans identification de la personne morale du fichier Kbis, ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'.",
       "source_dirs": [
-        "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse",
-        "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse"
+        "*Audit/*Opérateur/*Eléments juridiques/Société Emprunteuse"
       ],
       "hint_keywords": [
         "kbis",
@@ -91,8 +88,7 @@
       "format_hint": null,
       "context_hint": "Forme juridique de la société emprunteuse. C'est celle qui figure dans identification de la personne morale du fichier Kbis, ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'.",
       "source_dirs": [
-        "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse",
-        "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse"
+        "*Audit/*Opérateur/*Eléments juridiques/Société Emprunteuse"
       ],
       "hint_keywords": [
         "kbis",
@@ -109,8 +105,7 @@
       "format_hint": "nombre avec espaces séparateurs de milliers, sans € (ex: 10 000).Ce montant apparait dans la section 'Identification de la personne morale' du Kbis, ou dans les statuts. Si tu trouves les deux, privilégie le montant du Kbis. Ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'.",
       "context_hint": "Capital social de la société emprunteuse uniquement.",
       "source_dirs": [
-        "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse",
-        "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse"
+        "*Audit/*Opérateur/*Eléments juridiques/Société Emprunteuse"
       ],
       "hint_keywords": [
         "kbis",
@@ -128,8 +123,7 @@
       "format_hint": null,
       "context_hint": "Adresse du siège de la société emprunteuse.",
       "source_dirs": [
-        "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse",
-        "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse"
+        "*Audit/*Opérateur/*Eléments juridiques/Société Emprunteuse"
       ],
       "hint_keywords": [
         "kbis",
@@ -146,8 +140,7 @@
       "format_hint": null,
       "context_hint": "L'objet social ou activité principale de la société emprunteuse. C'est celle qui figure dans identification de la personne morale du fichier Kbis, ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'.",
       "source_dirs": [
-        "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse",
-        "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse"
+        "*Audit/*Opérateur/*Eléments juridiques/Société Emprunteuse"
       ],
       "hint_keywords": [
         "kbis",
@@ -164,8 +157,7 @@
       "format_hint": "Texte lisible sans JSON, ex: SIGNATURE - Président ; CACCHIOLI Juliette - Personne ayant le pouvoir de diriger, gérer ou engager à titre habituel",
       "context_hint": "Dirigeants de la société emprunteuse (président, gérant, DG). Le président peut être une personne morale.",
       "source_dirs": [
-        "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse",
-        "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Emprunteuse"
+        "*Audit/*Opérateur/*Eléments juridiques/Société Emprunteuse"
       ],
       "hint_keywords": [
         "kbis",
@@ -182,8 +174,8 @@
       "format_hint": "9 chiffres avec espaces, ou null si même société",
       "context_hint": "La société opération est celle qui porte le projet immobilier (souvent SCI ou SCCV). Si c'est la même que l'emprunteur, retourne null.",
       "source_dirs": [
-        "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Opération",
-        "2. Audit/{latest_folder}"
+        "*Audit/*Opérateur/*Eléments juridiques/Société Opération",
+        "*Audit/{selected_audit_folder}"
       ],
       "hint_keywords": [
         "kbis",
@@ -200,8 +192,8 @@
       "format_hint": null,
       "context_hint": "Ville du RCS de la société portant l'opération (si différente de l'emprunteuse).",
       "source_dirs": [
-        "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Opération",
-        "2. Audit/{latest_folder}"
+        "*Audit/*Opérateur/*Eléments juridiques/Société Opération",
+        "*Audit/{selected_audit_folder}"
       ],
       "hint_keywords": [
         "kbis",
@@ -218,8 +210,8 @@
       "format_hint": "format JJ/MM/AAAA ou null",
       "context_hint": "Date d'immatriculation de la société portant l'opération.",
       "source_dirs": [
-        "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Opération",
-        "2. Audit/{latest_folder}"
+        "*Audit/*Opérateur/*Eléments juridiques/Société Opération",
+        "*Audit/{selected_audit_folder}"
       ],
       "hint_keywords": [
         "kbis"
@@ -235,8 +227,8 @@
       "format_hint": null,
       "context_hint": "Nom officiel de la société portant l'opération immobilière.",
       "source_dirs": [
-        "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Opération",
-        "2. Audit/{latest_folder}"
+        "*Audit/*Opérateur/*Eléments juridiques/Société Opération",
+        "*Audit/{selected_audit_folder}"
       ],
       "hint_keywords": [
         "kbis",
@@ -253,8 +245,8 @@
       "type": "string",
       "format_hint": null,
       "source_dirs": [
-        "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Opération",
-        "2. Audit/{latest_folder}"
+        "*Audit/*Opérateur/*Eléments juridiques/Société Opération",
+        "*Audit/{selected_audit_folder}"
       ],
       "hint_keywords": [
         "kbis",
@@ -270,8 +262,8 @@
       "type": "string",
       "format_hint": "nombre avec espaces, sans €, ou null",
       "source_dirs": [
-        "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Opération",
-        "2. Audit/{latest_folder}"
+        "*Audit/*Opérateur/*Eléments juridiques/Société Opération",
+        "*Audit/{selected_audit_folder}"
       ],
       "hint_keywords": [
         "kbis",
@@ -288,8 +280,8 @@
       "type": "string",
       "format_hint": null,
       "source_dirs": [
-        "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Opération",
-        "2. Audit/{latest_folder}"
+        "*Audit/*Opérateur/*Eléments juridiques/Société Opération",
+        "*Audit/{selected_audit_folder}"
       ],
       "hint_keywords": [
         "kbis",
@@ -305,8 +297,8 @@
       "type": "string",
       "format_hint": null,
       "source_dirs": [
-        "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Opération",
-        "2. Audit/{latest_folder}"
+        "*Audit/*Opérateur/*Eléments juridiques/Société Opération",
+        "*Audit/{selected_audit_folder}"
       ],
       "hint_keywords": [
         "kbis",
@@ -323,8 +315,8 @@
       "format_hint": "Texte lisible sans JSON, ex: SIGNATURE - Président ; CACCHIOLI Juliette - Personne ayant le pouvoir de diriger, gérer ou engager à titre habituel",
       "context_hint": "Dirigeants de la société opération. Le président peut être une personne morale.",
       "source_dirs": [
-        "2. Audit/1. Opérateur/1. Eléments juridiques/ Société Opération",
-        "2. Audit/{latest_folder}"
+        "*Audit/*Opérateur/*Eléments juridiques/Société Opération",
+        "*Audit/{selected_audit_folder}"
       ],
       "hint_keywords": [
         "kbis",
@@ -422,10 +414,10 @@
         "fiche de renseignements patrimoniales"
       ],
       "source_dirs": [
-        "2. Audit/1. Opérateur/3. RH",
-        "2. Audit/1. Opérateur",
-        "2. Audit/1. Opérateur/3. Ressources Humaines",
-        "2. Audit/1. Opérateur/RH"
+        "*Audit/*Opérateur/*RH",
+        "*Audit/*Opérateur",
+        "*Audit/*Opérateur/*Ressources Humaines",
+        "*Audit/*Opérateur/RH"
       ],
       "hint_keywords": [
         "attestation",
@@ -449,8 +441,8 @@
         "fiche patrimoniale"
       ],
       "source_dirs": [
-        "2. Audit/1. Opérateur/3. RH",
-        "2. Audit/1. Opérateur"
+        "*Audit/*Opérateur/*RH",
+        "*Audit/*Opérateur"
       ],
       "hint_keywords": [
         "attestation",
@@ -481,8 +473,8 @@
         "attestation patrimoniale completee"
       ],
       "source_dirs": [
-        "2. Audit/1. Opérateur/3. RH",
-        "2. Audit/1. Opérateur"
+        "*Audit/*Opérateur/*RH",
+        "*Audit/*Opérateur"
       ],
       "hint_keywords": [
         "attestation",
@@ -511,12 +503,13 @@
         "2033"
       ],
       "source_dirs": [
-        "2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers",
-        "2. Audit/1. Opérateur/2. Eléments financiers"
+        "*Audit/*Opérateur/*Eléments financiers/*Etats Financiers",
+        "*Audit/*Opérateur/*Eléments financiers"
       ],
       "hint_keywords": [
         "bilan",
         "comptes annuels",
+        "ef",
         "liasse",
         "etats financiers"
       ]
@@ -541,12 +534,13 @@
         "2033"
       ],
       "source_dirs": [
-        "2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers",
-        "2. Audit/1. Opérateur/2. Eléments financiers"
+        "*Audit/*Opérateur/*Eléments financiers/*Etats Financiers",
+        "*Audit/*Opérateur/*Eléments financiers"
       ],
       "hint_keywords": [
         "bilan",
         "comptes annuels",
+        "ef",
         "liasse",
         "etats financiers"
       ]
@@ -568,12 +562,13 @@
         "2033"
       ],
       "source_dirs": [
-        "2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers",
-        "2. Audit/1. Opérateur/2. Eléments financiers"
+        "*Audit/*Opérateur/*Eléments financiers/*Etats Financiers",
+        "*Audit/*Opérateur/*Eléments financiers"
       ],
       "hint_keywords": [
         "bilan",
         "comptes annuels",
+        "ef",
         "liasse",
         "etats financiers"
       ]
@@ -598,12 +593,13 @@
         "2033"
       ],
       "source_dirs": [
-        "2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers",
-        "2. Audit/1. Opérateur/2. Eléments financiers"
+        "*Audit/*Opérateur/*Eléments financiers/*Etats Financiers",
+        "*Audit/*Opérateur/*Eléments financiers"
       ],
       "hint_keywords": [
         "bilan",
         "comptes annuels",
+        "ef",
         "liasse",
         "actif"
       ]
@@ -625,12 +621,13 @@
         "2033"
       ],
       "source_dirs": [
-        "2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers",
-        "2. Audit/1. Opérateur/2. Eléments financiers"
+        "*Audit/*Opérateur/*Eléments financiers/*Etats Financiers",
+        "*Audit/*Opérateur/*Eléments financiers"
       ],
       "hint_keywords": [
         "bilan",
         "comptes annuels",
+        "ef",
         "liasse",
         "passif"
       ]
@@ -653,12 +650,13 @@
         "compte de résultat"
       ],
       "source_dirs": [
-        "2. Audit/1. Opérateur/2. Eléments financiers/1. Etats Financiers",
-        "2. Audit/1. Opérateur/2. Eléments financiers"
+        "*Audit/*Opérateur/*Eléments financiers/*Etats Financiers",
+        "*Audit/*Opérateur/*Eléments financiers"
       ],
       "hint_keywords": [
         "bilan",
         "comptes annuels",
+        "ef",
         "liasse",
         "résultat",
         "compte de résultat"

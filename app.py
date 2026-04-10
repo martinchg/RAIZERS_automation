@@ -28,6 +28,8 @@ from runtime_config import configure_environment
 
 configure_environment(ROOT_DIR)
 
+from normalization import matches_pattern
+
 OUTPUT_DIR = ROOT_DIR / "output"
 LOGO_PATH = ROOT_DIR / "assets" / "raizers_logo.png"
 BACKGROUND_PATH = ROOT_DIR / "assets" / "background.jpg"
@@ -113,6 +115,35 @@ def _list_dropbox_entries(path: str) -> tuple[list[str], list[str]]:
     except Exception as e:
         st.error(f"Erreur connexion Dropbox : {e}")
         return [], []
+
+
+def _find_audit_folder_dropbox(project_path: str, max_depth: int = 3) -> str | None:
+    """Trouve le dossier 'Audit' dans un projet Dropbox (matching flexible).
+
+    Retourne le chemin Dropbox complet du dossier, ou None.
+    """
+    def _walk(path: str, depth: int) -> str | None:
+        folders, _ = _list_dropbox_entries(path)
+        for name in folders:
+            if matches_pattern(name, "*audit"):
+                return f"{path}/{name}"
+        if depth < max_depth:
+            for name in folders:
+                found = _walk(f"{path}/{name}", depth + 1)
+                if found:
+                    return found
+        return None
+
+    return _walk(project_path, 0)
+
+
+def _list_audit_subfolders_dropbox(project_path: str) -> list[str]:
+    """Liste les sous-dossiers du dossier Audit sélectionnables (hors Opérateur)."""
+    audit_path = _find_audit_folder_dropbox(project_path)
+    if not audit_path:
+        return []
+    folders, _ = _list_dropbox_entries(audit_path)
+    return [f for f in folders if not matches_pattern(f, "*operateur")]
 
 
 def _send_email(to: str, subject: str, body: str, attachment_path: Path | None = None):
@@ -486,20 +517,60 @@ if st.session_state.dbx_folders:
             "Projet",
             st.session_state.dbx_folders,
             label_visibility="collapsed",
+            key="selected_project_name",
         )
     selected_path = f"{DROPBOX_ROOT}/{selected_project}"
 else:
     st.warning("Aucun dossier trouvé dans Dropbox.")
     selected_path = ""
+    selected_project = ""
 with col2:
     if st.button("🔄", help="Rafraichir la liste"):
         _load_projects()
+        st.session_state.pop("audit_subfolders_cache", None)
         st.rerun()
 
-# --- Step 2 : Options ---
+# --- Step 2 : Sous-dossier d'audit à ingérer ---
 st.markdown("""
 <div class="step-card">
-    <h3><span class="step-number">2</span> Options</h3>
+    <h3><span class="step-number">2</span> Sous-dossier d'audit</h3>
+</div>
+""", unsafe_allow_html=True)
+
+selected_audit_subfolder: str | None = None
+if selected_path:
+    cache = st.session_state.setdefault("audit_subfolders_cache", {})
+    if selected_path not in cache:
+        with st.spinner("Lecture des sous-dossiers d'audit..."):
+            cache[selected_path] = _list_audit_subfolders_dropbox(selected_path)
+    audit_subfolders = cache[selected_path]
+
+    if audit_subfolders:
+        col_sub, col_sub_refresh = st.columns([5, 1])
+        with col_sub:
+            selected_audit_subfolder = st.selectbox(
+                "Sous-dossier d'audit à ingérer (en plus du dossier Opérateur)",
+                audit_subfolders,
+                label_visibility="collapsed",
+                key="selected_audit_subfolder",
+            )
+        with col_sub_refresh:
+            if st.button("🔄", key="refresh_audit_subfolders", help="Rafraîchir les sous-dossiers"):
+                cache.pop(selected_path, None)
+                st.rerun()
+        st.caption(
+            "Seuls ce sous-dossier et le dossier Opérateur associé seront ingérés."
+        )
+    else:
+        st.warning(
+            "Aucun sous-dossier d'audit trouvé (hors Opérateur). "
+            "Seul le dossier Opérateur sera ingéré s'il existe."
+        )
+
+# --- Step 3 : Options ---
+st.markdown("""
+<div class="step-card">
+    <h3><span class="step-number">3</span> Options</h3>
 </div>
 """, unsafe_allow_html=True)
 
@@ -518,7 +589,7 @@ if send_email:
 # --- Historique ---
 st.markdown("""
 <div class="step-card">
-    <h3><span class="step-number">3</span> Historique recent</h3>
+    <h3><span class="step-number">4</span> Historique recent</h3>
 </div>
 """, unsafe_allow_html=True)
 
@@ -570,7 +641,7 @@ if st.button("Lancer l'audit", type="primary", use_container_width=True):
         status.update(label="Pipeline Dropbox...")
         st.write("**Pipeline** — Sync Dropbox + extraction texte...")
         from pipeline import run as run_pipeline
-        run_pipeline(project_path)
+        run_pipeline(project_path, selected_audit_folder=selected_audit_subfolder)
 
         manifest_path = project_dir / "manifest.json"
         if manifest_path.exists():

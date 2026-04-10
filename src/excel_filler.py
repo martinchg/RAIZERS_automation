@@ -11,6 +11,8 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 
+from normalization import canonical_name, is_archived_path
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -46,32 +48,35 @@ def _style_header_row(ws, row: int, max_col: int):
 
 
 # ---------------------------------------------------------------------------
-# Helpers (inchangés)
+# Helpers
 # ---------------------------------------------------------------------------
 def _normalize_folder_name(value: str) -> str:
-    value = unicodedata.normalize("NFKD", value or "")
-    value = "".join(ch for ch in value if unicodedata.category(ch) != "Mn")
-    return re.sub(r"[^a-z0-9]+", "", value.lower())
+    """Clé compacte (alphanumérique) basée sur la canonicalisation partagée."""
+    return re.sub(r"[^a-z0-9]+", "", canonical_name(value or ""))
+
+
+_RH_CANON_ALIASES = {"rh", "ressources humaines"}
 
 
 def _extract_person_folder_from_source_path(source_path: str) -> Optional[str]:
-    if not source_path:
-        return None
-    if _is_old_label(source_path):
+    """Nom du sous-dossier personne sous RH. Matching flexible (alias : 'RH', 'Ressources Humaines')."""
+    if not source_path or _is_old_label(source_path):
         return None
 
     raw_parts = [p for p in source_path.replace("\\", "/").split("/") if p]
-    normalized_parts = [_normalize_folder_name(p) for p in raw_parts]
+    canon_parts = [canonical_name(p) for p in raw_parts]
 
-    try:
-        idx = normalized_parts.index(_normalize_folder_name("3. RH"))
-    except ValueError:
+    rh_idx = next(
+        (i for i, p in enumerate(canon_parts) if p in _RH_CANON_ALIASES),
+        None,
+    )
+    if rh_idx is None:
         return None
 
-    if idx + 1 >= len(raw_parts) - 1:
+    if rh_idx + 1 >= len(raw_parts) - 1:
         return None
 
-    candidate = raw_parts[idx + 1]
+    candidate = raw_parts[rh_idx + 1]
     if _is_old_label(candidate):
         return None
     return candidate
@@ -101,8 +106,7 @@ def _derive_person_folder_map_from_manifest(manifest_path: Path) -> Dict[str, st
 
 
 def _is_old_label(value: str) -> bool:
-    parts = [p.strip().lower() for p in value.replace("\\", "/").split("/")]
-    return any(part in {"old", ".old", "x - old"} for part in parts)
+    return is_archived_path(value)
 
 
 def _normalize_key(value: str) -> str:

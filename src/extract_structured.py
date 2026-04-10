@@ -13,6 +13,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -24,6 +25,12 @@ if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
 from excel_filler import fill_excel_template
+from normalization import (
+    canonical_name,
+    canonical_stem,
+    is_archived_path,
+    path_has_segments,
+)
 from runtime_config import configure_environment
 
 ROOT_DIR = _SRC_DIR.parent.resolve()
@@ -81,22 +88,8 @@ def _get_llm_client():
 # ---------------------------------------------------------------------------
 # Routing : quelles questions pour quel document ?
 # ---------------------------------------------------------------------------
-def _normalize(text: str) -> str:
-    """Normalise un chemin pour le matching : minuscules, sans accents, sans espaces multiples."""
-    import unicodedata
-    import re
-    text = text.lower().strip()
-    # Supprimer les accents (é→e, è→e, etc.)
-    text = unicodedata.normalize("NFD", text)
-    text = "".join(c for c in text if unicodedata.category(c) != "Mn")
-    # Normaliser séparateurs : underscores → espaces, multiples espaces → un
-    text = text.replace("_", " ").replace("-", " ")
-    # Normaliser les dossiers numérotés : "3.RH" → "3. rh", "2.Audit" → "2. audit"
-    text = re.sub(r"(\d)\.\s*", r"\1. ", text)
-    # Tolérer les espaces parasites autour des / dans les chemins
-    text = re.sub(r"\s*/\s*", "/", text)
-    text = re.sub(r"\s+", " ", text)
-    return text
+# Rétro-compat : certains appels externes historiques utilisaient _normalize.
+_normalize = canonical_name
 
 
 def _matches_doc_name(norm_filename: str, field: Dict) -> bool:
@@ -122,48 +115,62 @@ def _matches_doc_name(norm_filename: str, field: Dict) -> bool:
         return True
 
     for candidate in candidates:
-        words = _normalize(candidate).split()
+        words = canonical_name(candidate).split()
         if words and all(w in norm_filename for w in words):
             return True
 
     return False
 
 
-def match_questions_to_doc(doc_info: Dict, fields: List[Dict],
-                          latest_folder: Optional[str] = None) -> List[Dict]:
+def match_questions_to_doc(
+    doc_info: Dict,
+    fields: List[Dict],
+    selected_audit_folder: Optional[str] = None,
+) -> List[Dict]:
     """Retourne les questions pertinentes pour un document.
 
-     Logique :
-     1. Si ``source_dirs`` est défini, le source_path DOIT commencer par
-         un des dossiers (matching normalisé : sans accents, casse, espaces).
-     2. Ensuite le filtre classique par ``hint_keywords`` s'applique.
-     Le matching ``source_doc_name`` est volontairement délégué au LLM
-     (prompt-only) pour gérer les variantes et fautes de frappe.
+    Logique :
+
+    1. Si ``source_dirs`` est défini, ``source_path`` DOIT contenir l'un
+       des chemins indiqués en tant que sous-séquence de segments. La
+       comparaison est canonique : insensible à la casse, aux accents, aux
+       préfixes numériques ("0.", "1. ", "X.") et aux séparateurs parasites.
+       Les chemins comportant ``{selected_audit_folder}`` sont résolus à
+       runtime avec le dossier d'audit sélectionné.
+    2. Filtrage ensuite par ``hint_keywords`` (recherche canonique dans
+       filename + source_path).
+
+    Le matching ``source_doc_name`` reste délégué au LLM (prompt-only) pour
+    gérer variantes et fautes de frappe.
     """
-    filename = doc_info.get("filename", "").lower()
-    source_path = doc_info.get("source_path", "").lower()
+    filename = doc_info.get("filename", "")
+    source_path = doc_info.get("source_path", "")
 
-    # Versions normalisées pour le matching souple
-    norm_path = _normalize(source_path)
-    norm_filename = _normalize(filename)
+    # Haystack canonique pour la recherche par mots-clés
+    haystack_canon = f"{canonical_stem(filename)} {canonical_name(source_path)}"
 
-    matched = []
+    matched: List[Dict] = []
     for field in fields:
-        # 1. Filtre par dossier source (matching normalisé)
+        # 1) Filtre par dossier source (matching canonique par segments)
         dirs = field.get("source_dirs")
         if dirs:
-            resolved_dirs = []
+            resolved_dirs: List[str] = []
             for d in dirs:
-                if "{latest_folder}" in d and latest_folder:
-                    resolved_dirs.append(d.replace("{latest_folder}", latest_folder))
-                elif "{latest_folder}" not in d:
+                if "{selected_audit_folder}" in d:
+                    if selected_audit_folder:
+                        resolved_dirs.append(
+                            d.replace("{selected_audit_folder}", selected_audit_folder)
+                        )
+                else:
                     resolved_dirs.append(d)
-            if not any(norm_path.startswith(_normalize(d)) for d in resolved_dirs):
+            if resolved_dirs and not any(
+                path_has_segments(source_path, d) for d in resolved_dirs
+            ):
                 continue
 
-        # 2. Filtre par mots-clés
+        # 2) Filtre par mots-clés (recherche canonique)
         keywords = field.get("hint_keywords", [])
-        if any(_normalize(kw) in f"{norm_filename} {norm_path}" for kw in keywords):
+        if any(canonical_name(kw) in haystack_canon for kw in keywords):
             matched.append(field)
 
     return matched
@@ -181,38 +188,46 @@ def _format_parent(parent: dict) -> str:
 
 
 def _is_old_source_path(source_path: str) -> bool:
-    parts = [p.strip().lower() for p in source_path.replace("\\", "/").split("/")]
-    return any(part in {"old", ".old", "x - old"} for part in parts)
+    return is_archived_path(source_path)
+
+
+# Aliases canoniques possibles pour le dossier des ressources humaines
+_RH_CANON_ALIASES = {"rh", "ressources humaines"}
 
 
 def _extract_person_folder_from_source_path(source_path: str) -> Optional[str]:
-    """Retourne le dossier personne sous 3. RH, sinon None.
+    """Retourne le nom du dossier personne sous RH, sinon None.
+
+    Matching tolérant : '3. RH', 'RH', '3. Ressources Humaines', 'ressources
+    humaines' (casse/accents/préfixes ignorés).
 
     Exemples acceptés :
-    - 2. Audit/1. Opérateur/3. RH/Pernod/file.pdf -> "Pernod"
-    - 2. Audit/1. Opérateur/3. RH/Juliette et Florent/file.pdf -> "Juliette et Florent"
+    - 2. Audit/1. Opérateur/3. RH/Pernod/file.pdf            -> "Pernod"
+    - Audit/Opérateur/Ressources Humaines/Juliette/file.pdf  -> "Juliette"
 
     Exclusions :
-    - fichiers directement dans 3. RH (sans sous-dossier)
-    - chemins old/.old
+    - fichiers directement dans le dossier RH (sans sous-dossier)
+    - chemins old/.old/archive
     """
-    if _is_old_source_path(source_path):
+    if is_archived_path(source_path):
         return None
 
     raw_parts = [p for p in source_path.replace("\\", "/").split("/") if p]
-    normalized_parts = [_normalize(p) for p in raw_parts]
+    canon_parts = [canonical_name(p) for p in raw_parts]
 
-    try:
-        idx = normalized_parts.index(_normalize("3. RH"))
-    except ValueError:
+    rh_idx = next(
+        (i for i, p in enumerate(canon_parts) if p in _RH_CANON_ALIASES),
+        None,
+    )
+    if rh_idx is None:
         return None
 
-    # On veut STRICTEMENT un sous-dossier de 3. RH
-    if idx + 1 >= len(raw_parts) - 1:
+    # On veut STRICTEMENT un sous-dossier de RH (et un fichier en dessous).
+    if rh_idx + 1 >= len(raw_parts) - 1:
         return None
 
-    candidate = raw_parts[idx + 1]
-    if _is_old_source_path(candidate):
+    candidate = raw_parts[rh_idx + 1]
+    if is_archived_path(candidate):
         return None
     return candidate
 
@@ -367,6 +382,51 @@ def _is_per_company_field(field: Dict) -> bool:
     return field.get("excel_sheet") == "{company_name}"
 
 
+_YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2}|21\d{2})\b")
+
+
+def _extract_years_from_text(text: str) -> List[int]:
+    years = {int(match.group(1)) for match in _YEAR_RE.finditer(text or "")}
+    return sorted(years, reverse=True)
+
+
+def _get_doc_financial_year(doc_info: Dict) -> Optional[int]:
+    """Extrait l'année financière la plus récente visible dans le nom du document.
+
+    On priorise le filename, puis source_path en fallback.
+    """
+    filename = doc_info.get("filename", "")
+    years = _extract_years_from_text(filename)
+    if years:
+        return years[0]
+
+    source_path = doc_info.get("source_path", "")
+    years = _extract_years_from_text(source_path)
+    return years[0] if years else None
+
+
+def _select_latest_financial_years(
+    manifest_files: List[Dict],
+    company_fields: List[Dict],
+    selected_audit_folder: Optional[str] = None,
+    limit: int = 2,
+) -> set[int]:
+    """Détermine les N années les plus récentes présentes dans les docs financiers."""
+    years: set[int] = set()
+    for doc_info in manifest_files:
+        matched_company = match_questions_to_doc(doc_info, company_fields, selected_audit_folder)
+        if not matched_company:
+            continue
+        year = _get_doc_financial_year(doc_info)
+        if year is not None:
+            years.add(year)
+
+    if not years:
+        return set()
+
+    return set(sorted(years, reverse=True)[:limit])
+
+
 def _call_llm_with_retry(call_llm, prompt: str, max_retries: int = 3) -> Optional[str]:
     """Appelle le LLM avec retry sur 429."""
     for attempt in range(max_retries):
@@ -440,10 +500,9 @@ def run(project_id: str):
         if isinstance(f, dict) and f.get("field_id")
     ]
 
-    # Résoudre le nom du dernier dossier audit (pour {latest_folder})
-    latest_folder = manifest.get("latest_audit_folder")
-    if latest_folder:
-        logger.info(f"  🧭 Dernier dossier audit : {latest_folder}")
+    selected_audit_folder = manifest.get("selected_audit_folder")
+    if selected_audit_folder:
+        logger.info(f"  🧭 Dossier audit sélectionné : {selected_audit_folder}")
 
     # Séparer les champs classiques (1 réponse) des champs dynamiques
     global_fields = [
@@ -468,6 +527,17 @@ def run(project_id: str):
     company_name_display: Dict[str, str] = {}
     company_counter = 0
     extraction_log = []
+    latest_financial_years = _select_latest_financial_years(
+        manifest["files"],
+        company_fields,
+        selected_audit_folder,
+        limit=2,
+    )
+    if latest_financial_years:
+        logger.info(
+            "  📆 Années financières retenues : %s",
+            ", ".join(str(year) for year in sorted(latest_financial_years, reverse=True)),
+        )
 
     logger.info(f"Extraction structurée : {len(manifest['files'])} documents, "
                 f"{len(global_fields)} champs globaux, {len(person_fields)} champs per-person, "
@@ -484,13 +554,20 @@ def run(project_id: str):
             continue
 
         # --- Champs globaux (Opérateur) : première réponse non-null gagne ---
-        matched_global = match_questions_to_doc(doc_info, global_fields, latest_folder)
+        matched_global = match_questions_to_doc(doc_info, global_fields, selected_audit_folder)
         unanswered_global = [f for f in matched_global if results[f["field_id"]] is None]
 
         # --- Champs per-person (patrimoine) : groupés par dossier sous 3. RH ---
-        matched_person = match_questions_to_doc(doc_info, person_fields, latest_folder)
+        matched_person = match_questions_to_doc(doc_info, person_fields, selected_audit_folder)
         # --- Champs per-company (bilan) : groupés par société extraite du document ---
-        matched_company = match_questions_to_doc(doc_info, company_fields, latest_folder)
+        matched_company = match_questions_to_doc(doc_info, company_fields, selected_audit_folder)
+        if matched_company and latest_financial_years:
+            doc_year = _get_doc_financial_year(doc_info)
+            if doc_year is not None and doc_year not in latest_financial_years:
+                logger.info(
+                    f"  ⏭️  Doc financier ignoré (année {doc_year} hors 2 dernières) : {filename}"
+                )
+                matched_company = []
 
         person_folder = None
         if matched_person:
