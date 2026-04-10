@@ -6,6 +6,7 @@ Déploiement  : Streamlit Community Cloud (gratuit)
 """
 
 import json
+import importlib
 import logging
 import os
 import re
@@ -640,8 +641,9 @@ if st.button("Lancer l'audit", type="primary", use_container_width=True):
     try:
         status.update(label="Pipeline Dropbox...")
         st.write("**Pipeline** — Sync Dropbox + extraction texte...")
-        from pipeline import run as run_pipeline
-        run_pipeline(project_path, selected_audit_folder=selected_audit_subfolder)
+        import pipeline as pipeline_module
+        pipeline_module = importlib.reload(pipeline_module)
+        pipeline_module.run(project_path, selected_audit_folder=selected_audit_subfolder)
 
         manifest_path = project_dir / "manifest.json"
         if manifest_path.exists():

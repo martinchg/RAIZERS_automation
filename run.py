@@ -9,6 +9,7 @@ Usage :
     python run.py fill      --results output/.../extraction_results.json
 """
 import argparse
+import importlib
 import logging
 import sys
 from pathlib import Path
@@ -54,8 +55,9 @@ def main():
     args = parser.parse_args()
 
     if args.command == "pipeline":
-        from pipeline import run
-        run(args.project, selected_audit_folder=args.audit_folder)
+        import pipeline as pipeline_module
+        pipeline_module = importlib.reload(pipeline_module)
+        pipeline_module.run(args.project, selected_audit_folder=args.audit_folder)
 
     elif args.command == "extract":
         from extract_structured import run
