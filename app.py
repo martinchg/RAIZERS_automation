@@ -6,6 +6,7 @@ Déploiement  : Streamlit Community Cloud (gratuit)
 """
 
 import json
+import contextlib
 import importlib
 import logging
 import os
@@ -540,6 +541,8 @@ with col2:
     if st.button("🔄", help="Rafraichir la liste"):
         _load_projects()
         st.session_state.pop("audit_subfolders_cache", None)
+        st.session_state.pop("selected_audit_subfolder", None)
+        st.session_state.pop("_audit_subfolder_project_path", None)
         st.rerun()
 
 # --- Step 2 : Sous-dossier d'audit à ingérer ---
@@ -551,6 +554,11 @@ st.markdown("""
 
 selected_audit_subfolder: str | None = None
 if selected_path:
+    previous_audit_project = st.session_state.get("_audit_subfolder_project_path")
+    if previous_audit_project != selected_path:
+        st.session_state.pop("selected_audit_subfolder", None)
+        st.session_state["_audit_subfolder_project_path"] = selected_path
+
     cache = st.session_state.setdefault("audit_subfolders_cache", {})
     if selected_path not in cache:
         with st.spinner("Lecture des sous-dossiers d'audit..."):
@@ -558,6 +566,10 @@ if selected_path:
     audit_subfolders = cache[selected_path]
 
     if audit_subfolders:
+        current_subfolder = st.session_state.get("selected_audit_subfolder")
+        if current_subfolder not in audit_subfolders:
+            st.session_state.pop("selected_audit_subfolder", None)
+
         col_sub, col_sub_refresh = st.columns([5, 1])
         with col_sub:
             selected_audit_subfolder = st.selectbox(
@@ -569,6 +581,7 @@ if selected_path:
         with col_sub_refresh:
             if st.button("🔄", key="refresh_audit_subfolders", help="Rafraîchir les sous-dossiers"):
                 cache.pop(selected_path, None)
+                st.session_state.pop("selected_audit_subfolder", None)
                 st.rerun()
         st.caption(
             "Seuls ce sous-dossier et le dossier Opérateur associé seront ingérés."
@@ -828,7 +841,8 @@ if st.button("Lancer l'audit", type="primary", use_container_width=True):
         )
 
     # --- Résumé final ---
-    root_logger.removeHandler(log_handler)
+    with contextlib.suppress(Exception):
+        root_logger.removeHandler(log_handler)
 
     all_ok = all("ERREUR" not in str(v) for v in results_summary.values())
     duration_seconds = time.perf_counter() - started_perf

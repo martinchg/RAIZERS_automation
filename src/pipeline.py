@@ -50,16 +50,18 @@ QUESTIONS_PATH = ROOT_DIR / "config" / "questions.json"
 SUPPORTED_EXT = {".pdf", ".docx", ".txt", ".pptx", ".xlsx", ".xls", ".md", ".ppt"}
 PARENT_SIZE = 2000
 DEFAULT_DOC_TIMEOUT_SECONDS = int(os.environ.get("PIPELINE_DOC_TIMEOUT_SECONDS", "90"))
-ENABLE_PIPELINE_PREFILTER = os.environ.get("PIPELINE_ENABLE_PREFILTER", "").strip().lower() in {"1", "true", "yes", "on"}
+ENABLE_PIPELINE_PREFILTER = os.environ.get("PIPELINE_ENABLE_PREFILTER", "1").strip().lower() not in {"0", "false", "no", "off"}
 
 AUDIT_PATTERNS = ["audit", "*audit", "audit*", "*audit*"]
 OPERATEUR_PATTERNS = ["operateur", "*operateur", "operateur*", "*operateur*"]
 
-PIPELINE_STRONG_HINTS = {
+PIPELINE_ALWAYS_KEEP_HINTS = {
     "kbis",
     "statut",
     "statuts",
     "contrat obligataire",
+    "contrat",
+    "gfa",
     "avenant",
     "garantie",
     "hypotheque",
@@ -76,6 +78,9 @@ PIPELINE_STRONG_HINTS = {
     "fiche patrimoniale",
     "patrimoniale",
     "casier judiciaire",
+    "extrait de casier",
+    "bulletin n3",
+    "bulletin numero 3",
     "avis d impot",
     "carte identite",
     "piece identite",
@@ -83,18 +88,15 @@ PIPELINE_STRONG_HINTS = {
     "planning",
     "track record",
 }
-
-PIPELINE_PATH_HINTS = {
-    "elements juridiques",
-    "elements financiers",
-    "etats financiers",
-    "rh",
-    "ressources humaines",
+PIPELINE_AUDIT_FOLDER_HINTS = {
     "acquisition",
+    "garantie",
     "garanties",
     "hypotheque",
     "construction",
     "travaux",
+    "elements techniques",
+    "elements financiers",
 }
 
 # ---------------------------------------------------------------------------
@@ -173,23 +175,6 @@ def _contains_canonical_phrase(haystack: str, phrase: str) -> bool:
     return re.search(regex, haystack) is not None
 
 
-def _collect_pipeline_hint_pool(fields: List[dict]) -> List[str]:
-    hints = set(PIPELINE_STRONG_HINTS)
-    for field in fields:
-        for key in ("hint_keywords", "source_doc_name_variants"):
-            for value in field.get(key, []):
-                if isinstance(value, str) and value.strip():
-                    hints.add(value)
-        source_doc_name = field.get("source_doc_name")
-        if isinstance(source_doc_name, str) and source_doc_name.strip():
-            hints.add(source_doc_name)
-    return sorted(
-        {canonical_name(hint) for hint in hints if canonical_name(hint)},
-        key=len,
-        reverse=True,
-    )
-
-
 def _resolve_source_dirs(fields: List[dict], selected_audit_folder: Optional[str]) -> List[str]:
     resolved_dirs: List[str] = []
     for field in fields:
@@ -213,64 +198,50 @@ def _is_specific_source_dir(path_pattern: str) -> bool:
     ]
     if len(informative_segments) < 3:
         return False
-    return informative_segments[-1] not in {"audit", "operateur"}
+    return informative_segments[-1] not in {
+        "audit",
+        "operateur",
+        "rh",
+        "ressources humaines",
+        "elements juridiques",
+        "elements financiers",
+    }
 
 
-def _score_pipeline_relevance(
-    doc_info: dict,
-    fields: List[dict],
-    hint_pool: List[str],
-    resolved_source_dirs: List[str],
-    selected_audit_folder: Optional[str],
-) -> tuple[int, List[str]]:
-    source_path = doc_info.get("source_path", "")
-    filename = doc_info.get("filename", "")
-    stem = Path(filename).stem
-    haystack = canonical_name(f"{stem} {source_path}")
-    path_canon = canonical_name(source_path.replace("/", " "))
-
-    score = 0
-    reasons: List[str] = []
-
-    try:
-        from extract_structured import match_questions_to_doc
-        exact_matches = match_questions_to_doc(doc_info, fields, selected_audit_folder)
-    except Exception:
-        exact_matches = []
-
-    if exact_matches:
-        score += 4
-        reasons.append(f"questions:{len(exact_matches)}")
-
-    try:
-        from extract_people_from_casiers import _is_casier_judiciaire_filename
-    except Exception:
-        _is_casier_judiciaire_filename = None
-
-    if _is_casier_judiciaire_filename and _is_casier_judiciaire_filename(filename):
-        score += 3
-        reasons.append("casier")
-
-    specific_dir_hits = [
+def _matching_specific_source_dirs(source_path: str, resolved_source_dirs: List[str]) -> List[str]:
+    return [
         path_pattern
         for path_pattern in resolved_source_dirs
         if _is_specific_source_dir(path_pattern) and path_has_segments(source_path, path_pattern)
     ]
-    if specific_dir_hits:
-        score += 2
-        reasons.append("dossier")
 
-    hint_hits = [hint for hint in hint_pool if _contains_canonical_phrase(haystack, hint)]
-    if hint_hits:
-        score += 2
-        reasons.append(f"indices:{', '.join(hint_hits[:3])}")
 
-    path_hits = [marker for marker in PIPELINE_PATH_HINTS if _contains_canonical_phrase(path_canon, marker)]
-    if path_hits:
-        score += 1
-        reasons.append(f"path:{', '.join(path_hits[:2])}")
+def _matching_keep_hints(source_path: str, filename: str) -> List[str]:
+    haystack = canonical_name(f"{Path(filename).stem} {source_path.replace('/', ' ')}")
+    hits = [
+        hint
+        for hint in PIPELINE_ALWAYS_KEEP_HINTS
+        if _contains_canonical_phrase(haystack, hint)
+    ]
+    return sorted(set(hits))
 
-    return score, reasons
+
+def _is_in_selected_audit_folder(source_path: str, selected_audit_folder: Optional[str]) -> bool:
+    if not selected_audit_folder:
+        return False
+    return path_has_segments(source_path, f"*Audit/{selected_audit_folder}")
+
+
+def _matching_audit_folder_hints(source_path: str, selected_audit_folder: Optional[str]) -> List[str]:
+    if not _is_in_selected_audit_folder(source_path, selected_audit_folder):
+        return []
+    path_canon = canonical_name(source_path.replace("/", " "))
+    hits = [
+        hint
+        for hint in PIPELINE_AUDIT_FOLDER_HINTS
+        if _contains_canonical_phrase(path_canon, hint)
+    ]
+    return sorted(set(hits))
 
 
 def _is_manually_excluded(source_path: str, filename: str, patterns: List[str]) -> bool:
@@ -315,12 +286,24 @@ def prefilter_files_for_extraction(
     if not fields:
         return manually_filtered
 
-    hint_pool = _collect_pipeline_hint_pool(fields)
     resolved_source_dirs = _resolve_source_dirs(fields, selected_audit_folder)
+    try:
+        from extract_structured import match_questions_to_doc
+    except Exception:
+        match_questions_to_doc = None
+    try:
+        from extract_people_from_casiers import _is_casier_judiciaire_filename
+    except Exception:
+        _is_casier_judiciaire_filename = None
 
     relevant_files: List[Path] = []
     kept_reasons: List[str] = []
-    skipped_by_questions = 0
+    kept_by_questions = 0
+    kept_by_source_dir = 0
+    kept_by_doc_family = 0
+    kept_by_audit_folder = 0
+    skipped_by_prefilter = 0
+
     for file_path in manually_filtered:
         source_path = compute_source_path(file_path, project_local_root)
         doc_info = {
@@ -328,24 +311,58 @@ def prefilter_files_for_extraction(
             "source_path": source_path,
             "file_type": file_path.suffix.lstrip(".").lower(),
         }
-        score, reasons = _score_pipeline_relevance(
-            doc_info,
-            fields,
-            hint_pool,
-            resolved_source_dirs,
-            selected_audit_folder,
+        reasons: List[str] = []
+
+        matched_fields = (
+            match_questions_to_doc(doc_info, fields, selected_audit_folder)
+            if match_questions_to_doc else []
         )
-        if score >= 2:
+        if matched_fields:
+            kept_by_questions += 1
+            reasons.append(f"questions:{len(matched_fields)}")
+
+        specific_dir_hits = _matching_specific_source_dirs(source_path, resolved_source_dirs)
+        if specific_dir_hits:
+            kept_by_source_dir += 1
+            reasons.append("dossier_source")
+
+        is_casier = bool(
+            _is_casier_judiciaire_filename
+            and _is_casier_judiciaire_filename(file_path.name)
+        )
+        if is_casier:
+            kept_by_doc_family += 1
+            reasons.append("famille:casier")
+
+        keep_hint_hits = _matching_keep_hints(source_path, file_path.name)
+        if keep_hint_hits:
+            kept_by_doc_family += 1
+            reasons.append(f"famille:{', '.join(keep_hint_hits[:2])}")
+
+        audit_folder_hits = _matching_audit_folder_hints(source_path, selected_audit_folder)
+        if audit_folder_hits:
+            kept_by_audit_folder += 1
+            reasons.append(f"dossier_audit:{', '.join(audit_folder_hits[:2])}")
+
+        if reasons:
             relevant_files.append(file_path)
             kept_reasons.append(f"{source_path} [{'; '.join(reasons)}]")
-        else:
-            skipped_by_questions += 1
+            continue
+
+        skipped_by_prefilter += 1
 
     logger.info(
         "  🎯 Préfiltrage pipeline : %s/%s fichier(s) gardé(s), %s ignoré(s)",
         len(relevant_files),
         len(manually_filtered),
-        skipped_by_questions,
+        skipped_by_prefilter,
+    )
+    logger.info(
+        "    ↳ raisons : questions=%s, dossiers_source=%s, familles=%s, dossiers_audit=%s",
+        kept_by_questions,
+        kept_by_source_dir,
+        kept_by_doc_family,
+        kept_by_audit_folder,
     )
     for line in kept_reasons[:15]:
         logger.info("    ✅ %s", line)
