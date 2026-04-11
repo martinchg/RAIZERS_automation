@@ -37,6 +37,7 @@ LOGO_PATH = ROOT_DIR / "assets" / "raizers_logo.png"
 BACKGROUND_PATH = ROOT_DIR / "assets" / "background.jpg"
 HISTORY_PATH = OUTPUT_DIR / "audit_history.json"
 AUTH_USER_ENV = "APP_AUTH_USER"
+EN_AUDIT_PATTERNS = ["en audit", "*en audit*", "audit", "*audit*"]
 AUDIT_PATTERNS = ["audit", "*audit", "audit*", "*audit*"]
 OPERATEUR_PATTERNS = ["operateur", "*operateur", "operateur*", "*operateur*"]
 AUTH_PASS_ENV = "APP_AUTH_PASS"
@@ -67,9 +68,11 @@ def _find_audit_root() -> str:
     """
     from dropbox.files import FolderMetadata
     dbx = _get_dropbox_client()
+    last_error: Exception | None = None
 
     def _find_audit_in(path: str, depth: int = 0) -> str | None:
-        if depth > 2:  # ne pas chercher trop profond
+        nonlocal last_error
+        if depth > 6:  # aligné avec la recherche backend
             return None
         try:
             result = dbx.files_list_folder(path, recursive=False)
@@ -80,7 +83,9 @@ def _find_audit_root() -> str:
                     break
                 result = dbx.files_list_folder_continue(result.cursor)
             for entry in entries:
-                if isinstance(entry, FolderMetadata) and "en audit" in entry.name.lower():
+                if isinstance(entry, FolderMetadata) and any(
+                    matches_pattern(entry.name, pattern) for pattern in EN_AUDIT_PATTERNS
+                ):
                     return entry.path_display
             # Pas trouvé ici, chercher un niveau plus bas
             for entry in entries:
@@ -88,11 +93,13 @@ def _find_audit_root() -> str:
                     found = _find_audit_in(entry.path_display, depth + 1)
                     if found:
                         return found
-        except Exception:
-            pass
+        except Exception as exc:
+            last_error = exc
         return None
 
     found = _find_audit_in("")
+    if not found and last_error is not None:
+        raise RuntimeError(f"Dropbox inaccessible pendant la recherche du dossier audit: {last_error}")
     return found or ""
 
 
@@ -505,12 +512,26 @@ st.markdown("""
 
 if "dbx_root" not in st.session_state:
     with st.spinner("Connexion Dropbox..."):
-        st.session_state.dbx_root = _find_audit_root()
+        try:
+            st.session_state.dbx_root = _find_audit_root()
+            st.session_state.pop("dbx_root_error", None)
+        except Exception as exc:
+            st.session_state.dbx_root = ""
+            st.session_state.dbx_root_error = str(exc)
 
 DROPBOX_ROOT = st.session_state.dbx_root
 
 if not DROPBOX_ROOT:
-    st.error("Impossible de trouver un dossier 'En audit' dans votre Dropbox.")
+    root_error = st.session_state.get("dbx_root_error")
+    if root_error:
+        st.error(f"Connexion Dropbox : {root_error}")
+    else:
+        st.error("Impossible de trouver un dossier 'En audit' dans votre Dropbox.")
+    if st.button("Réessayer la connexion Dropbox", type="primary"):
+        st.session_state.pop("dbx_root", None)
+        st.session_state.pop("dbx_root_error", None)
+        st.session_state.pop("dbx_client", None)
+        st.rerun()
     st.stop()
 
 if "dbx_folders" not in st.session_state:
