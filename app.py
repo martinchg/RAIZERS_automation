@@ -511,60 +511,71 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 if "dbx_root" not in st.session_state:
-    with st.spinner("Connexion Dropbox..."):
-        try:
-            st.session_state.dbx_root = _find_audit_root()
-            st.session_state.pop("dbx_root_error", None)
-        except Exception as exc:
-            st.session_state.dbx_root = ""
-            st.session_state.dbx_root_error = str(exc)
-
-DROPBOX_ROOT = st.session_state.dbx_root
-
-if not DROPBOX_ROOT:
-    root_error = st.session_state.get("dbx_root_error")
-    if root_error:
-        st.error(f"Connexion Dropbox : {root_error}")
-    else:
-        st.error("Impossible de trouver un dossier 'En audit' dans votre Dropbox.")
-    if st.button("Réessayer la connexion Dropbox", type="primary"):
-        st.session_state.pop("dbx_root", None)
-        st.session_state.pop("dbx_root_error", None)
-        st.session_state.pop("dbx_client", None)
-        st.rerun()
-    st.stop()
-
+    st.session_state.dbx_root = ""
 if "dbx_folders" not in st.session_state:
     st.session_state.dbx_folders = []
+if "dbx_browser_ready" not in st.session_state:
+    st.session_state.dbx_browser_ready = False
+
+DROPBOX_ROOT = st.session_state.dbx_root
+selected_project = ""
+selected_path = ""
 
 def _load_projects():
-    folders, _ = _list_dropbox_entries(DROPBOX_ROOT)
+    dropbox_root = st.session_state.get("dbx_root", "")
+    if not dropbox_root:
+        st.session_state.dbx_folders = []
+        return
+    folders, _ = _list_dropbox_entries(dropbox_root)
     st.session_state.dbx_folders = folders
 
-if not st.session_state.dbx_folders:
-    _load_projects()
+manual_project_path = st.text_input(
+    "Chemin Dropbox du projet",
+    value=st.session_state.get("manual_project_path", ""),
+    placeholder="/RAIZERS - En audit/NOM DU PROJET",
+    help="Option rapide : tu peux saisir le chemin Dropbox du projet sans charger la liste automatiquement.",
+    key="manual_project_path",
+)
 
-col1, col2 = st.columns([5, 1])
-if st.session_state.dbx_folders:
-    with col1:
+col_browser, col_refresh = st.columns([5, 1])
+with col_browser:
+    if not st.session_state.dbx_browser_ready:
+        if st.button("Charger la liste des projets Dropbox", use_container_width=True):
+            with st.spinner("Connexion Dropbox..."):
+                try:
+                    st.session_state.dbx_root = _find_audit_root()
+                    st.session_state.pop("dbx_root_error", None)
+                    _load_projects()
+                    st.session_state.dbx_browser_ready = True
+                except Exception as exc:
+                    st.session_state.dbx_root = ""
+                    st.session_state.dbx_folders = []
+                    st.session_state.dbx_root_error = str(exc)
+    elif st.session_state.dbx_folders:
         selected_project = st.selectbox(
             "Projet",
             st.session_state.dbx_folders,
             label_visibility="collapsed",
             key="selected_project_name",
         )
-    selected_path = f"{DROPBOX_ROOT}/{selected_project}"
-else:
-    st.warning("Aucun dossier trouvé dans Dropbox.")
-    selected_path = ""
-    selected_project = ""
-with col2:
-    if st.button("🔄", help="Rafraichir la liste"):
+        selected_path = f"{DROPBOX_ROOT}/{selected_project}"
+    else:
+        st.warning("Aucun dossier trouvé dans Dropbox.")
+with col_refresh:
+    if st.session_state.dbx_browser_ready and st.button("🔄", help="Rafraichir la liste"):
         _load_projects()
         st.session_state.pop("audit_subfolders_cache", None)
         st.session_state.pop("selected_audit_subfolder", None)
         st.session_state.pop("_audit_subfolder_project_path", None)
         st.rerun()
+
+if st.session_state.get("dbx_root_error"):
+    st.warning(f"Dropbox non chargé : {st.session_state['dbx_root_error']}")
+
+manual_project_path = manual_project_path.strip()
+if manual_project_path:
+    selected_path = manual_project_path
+    selected_project = manual_project_path.rstrip("/").rsplit("/", 1)[-1]
 
 # --- Step 2 : Sous-dossier d'audit à ingérer ---
 st.markdown("""
@@ -573,8 +584,23 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-selected_audit_subfolder: str | None = None
-if selected_path:
+manual_audit_subfolder = st.text_input(
+    "Sous-dossier d'audit (optionnel)",
+    value=st.session_state.get("manual_audit_subfolder", ""),
+    placeholder="Ex: 3. Opération - Rue de la Loge",
+    help="Tu peux le saisir à la main si tu ne charges pas la liste Dropbox.",
+    key="manual_audit_subfolder",
+).strip()
+
+selected_audit_subfolder: str | None = manual_audit_subfolder or None
+can_browse_audit_subfolders = bool(
+    selected_path
+    and DROPBOX_ROOT
+    and selected_path.startswith(f"{DROPBOX_ROOT}/")
+    and st.session_state.dbx_browser_ready
+)
+
+if can_browse_audit_subfolders:
     previous_audit_project = st.session_state.get("_audit_subfolder_project_path")
     if previous_audit_project != selected_path:
         st.session_state.pop("selected_audit_subfolder", None)
@@ -593,12 +619,14 @@ if selected_path:
 
         col_sub, col_sub_refresh = st.columns([5, 1])
         with col_sub:
-            selected_audit_subfolder = st.selectbox(
+            browse_selected_audit_subfolder = st.selectbox(
                 "Sous-dossier d'audit à ingérer (en plus du dossier Opérateur)",
                 audit_subfolders,
                 label_visibility="collapsed",
                 key="selected_audit_subfolder",
             )
+            if not selected_audit_subfolder:
+                selected_audit_subfolder = browse_selected_audit_subfolder
         with col_sub_refresh:
             if st.button("🔄", key="refresh_audit_subfolders", help="Rafraîchir les sous-dossiers"):
                 cache.pop(selected_path, None)
@@ -612,6 +640,8 @@ if selected_path:
             "Aucun sous-dossier d'audit trouvé (hors Opérateur). "
             "Seul le dossier Opérateur sera ingéré s'il existe."
         )
+elif selected_path:
+    st.caption("Charge la liste Dropbox si tu veux que l'app propose automatiquement les sous-dossiers d'audit.")
 
 # --- Step 3 : Options ---
 st.markdown("""
