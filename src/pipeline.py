@@ -9,6 +9,7 @@ import signal
 import sys
 import threading
 import time
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
@@ -61,8 +62,6 @@ PIPELINE_ALWAYS_KEEP_HINTS = {
     "statuts",
     "contrat obligataire",
     "contrat",
-    "gfa",
-    "avenant",
     "garantie",
     "hypotheque",
     "promesse de vente",
@@ -82,9 +81,6 @@ PIPELINE_ALWAYS_KEEP_HINTS = {
     "bulletin n3",
     "bulletin numero 3",
     "avis d impot",
-    "carte identite",
-    "piece identite",
-    "organigramme",
     "planning",
     "track record",
 }
@@ -619,16 +615,33 @@ def filter_audit_files(
         logger.warning("Aucun dossier cible (ni Opérateur, ni sous-dossier choisi) → aucun fichier retenu")
         return [], None
 
-    filtered = [f for f in all_files if any(f.is_relative_to(d) for d in target_dirs)]
+    filtered = [f for f in all_files if any(_is_path_within(f, d) for d in target_dirs)]
     logger.info(f"  📂 {len(filtered)}/{len(all_files)} fichiers retenus")
     return filtered, selected_folder_name
 
+
+
+def _normalized_fs_parts(path: Path) -> tuple[str, ...]:
+    return tuple(
+        unicodedata.normalize("NFC", str(part)).casefold()
+        for part in path.parts
+    )
+
+
+def _is_path_within(path: Path, base_dir: Path) -> bool:
+    path_parts = _normalized_fs_parts(path)
+    base_parts = _normalized_fs_parts(base_dir)
+    return len(path_parts) >= len(base_parts) and path_parts[: len(base_parts)] == base_parts
 
 
 def compute_source_path(file_path: Path, project_local_root: Path) -> str:
     try:
         return str(file_path.relative_to(project_local_root))
     except ValueError:
+        if _is_path_within(file_path, project_local_root):
+            relative_parts = file_path.parts[len(project_local_root.parts):]
+            if relative_parts:
+                return str(Path(*relative_parts))
         return file_path.name
 
 
@@ -699,9 +712,18 @@ def run(project_path: str, selected_audit_folder: Optional[str] = None):
     relative_project = project_path.strip("/")
     project_local_root = LOCAL_CACHE / relative_project
 
+    # Important: on se base sur les fichiers effectivement synchronisés
+    # pendant ce run, pas sur tout le cache local du projet.
+    # Sinon un renommage côté Dropbox laisse des anciens chemins en cache
+    # (ex: "RH/Pernod" -> "RH/Céline Pernod") et on réingère les deux.
     discovered_files = sorted(
-        p for p in project_local_root.rglob("*")
-        if p.suffix.lower() in SUPPORTED_EXT and p.is_file() and not is_old_folder_path(p)
+        {
+            p for p in downloaded
+            if p.is_file()
+            and p.suffix.lower() in SUPPORTED_EXT
+            and not is_old_folder_path(p)
+            and _is_path_within(p, project_local_root)
+        }
     )
     logger.info(f"  📂 {len(discovered_files)} fichier(s) trouvé(s)")
 

@@ -6,6 +6,7 @@ Usage :
     python run.py pipeline  --project "/RAIZERS - En audit/SIGNATURE" --audit-folder "3. Opération - Rue de la Loge"
     python run.py extract   --project raizers-en-audit-signature
     python run.py mandats   --project raizers-en-audit-signature
+    python run.py fill      --project raizers-en-audit-signature
     python run.py fill      --results output/.../extraction_results.json
 """
 import argparse
@@ -48,6 +49,7 @@ def main():
 
     # --- fill : remplissage Excel seul ---
     p3 = sub.add_parser("fill", help="Remplir un Excel depuis extraction_results.json")
+    p3.add_argument("--project", "-p", default=None, help="project_id")
     p3.add_argument("--results", default=None, help="Chemin vers extraction_results.json")
     p3.add_argument("--questions", default=str(ROOT_DIR / "config" / "questions.json"))
     p3.add_argument("--output-dir", default=None)
@@ -69,12 +71,23 @@ def main():
 
     elif args.command == "fill":
         from excel_filler import main as fill_main
+        results_path = args.results
+        output_dir = args.output_dir
+
+        if args.project:
+            project_output_dir = ROOT_DIR / "output" / args.project
+            results_path = results_path or str(project_output_dir / "extraction_results.json")
+            output_dir = output_dir or str(project_output_dir)
+
+        if not results_path:
+            parser.error("fill requiert --project ou --results")
+
         # Override sys.argv pour le sous-parser d'excel_filler
         argv = ["excel_filler.py",
-                "--results", args.results or "",
+                "--results", results_path,
                 "--questions", args.questions]
-        if args.output_dir:
-            argv += ["--output-dir", args.output_dir]
+        if output_dir:
+            argv += ["--output-dir", output_dir]
         sys.argv = argv
         fill_main()
 

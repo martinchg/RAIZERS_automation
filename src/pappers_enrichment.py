@@ -8,7 +8,6 @@ import requests
 
 
 PAPPERS_BASE_URL = os.environ.get("PAPPERS_BASE_URL", "https://api.pappers.fr/v2").rstrip("/")
-MAX_RECHERCHE_RESULTS = 30
 
 
 class PappersError(Exception):
@@ -49,7 +48,7 @@ def _first_prenom(value: str) -> str:
 
 
 def _extract_results_list(data: dict) -> List[dict]:
-    for key in ["resultats", "results", "entreprises"]:
+    for key in ["resultats", "results", "entreprises", "dirigeants"]:
         value = data.get(key)
         if isinstance(value, list):
             return value
@@ -68,21 +67,17 @@ def _extract_company_name(item: dict) -> Optional[str]:
 
 
 def _dedupe_company_rows(rows: List[dict]) -> List[dict]:
-    seen = set()
-    out = []
+    merged_rows: Dict[str, dict] = {}
+    ordered_keys: List[str] = []
 
     for row in rows:
         nom_societe = _clean_text(row.get("nom_societe", ""))
         siren = _clean_text(str(row.get("siren") or ""))
-
         dedupe_key = siren or nom_societe.lower()
         if not dedupe_key:
             continue
-        if dedupe_key in seen:
-            continue
 
-        seen.add(dedupe_key)
-        out.append({
+        normalized_row = {
             "nom_societe": nom_societe,
             "siren": siren or None,
             "siret": row.get("siret"),
@@ -96,101 +91,144 @@ def _dedupe_company_rows(rows: List[dict]) -> List[dict]:
             "resultat_net": row.get("resultat_net"),
             "statut_rcs": row.get("statut_rcs"),
             "nb_dirigeants_total": row.get("nb_dirigeants_total"),
-        })
+            "role": row.get("role"),
+            "detention": row.get("detention"),
+            "commentaires": row.get("commentaires"),
+        }
 
+        if dedupe_key not in merged_rows:
+            merged_rows[dedupe_key] = normalized_row
+            ordered_keys.append(dedupe_key)
+            continue
+
+        existing = merged_rows[dedupe_key]
+        for key, value in normalized_row.items():
+            if existing.get(key) in (None, "", [], {}) and value not in (None, "", [], {}):
+                existing[key] = value
+
+    return [merged_rows[key] for key in ordered_keys]
+
+
+def _normalize_birthdate(value: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    text = _clean_text(str(value or ""))
+    if not text:
+        return None, None
+
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+        return text, text[:7]
+    if re.fullmatch(r"\d{4}-\d{2}", text):
+        return None, text
+    if re.fullmatch(r"\d{2}/\d{2}/\d{4}", text):
+        day, month, year = text.split("/")
+        return f"{year}-{month}-{day}", f"{year}-{month}"
+    if re.fullmatch(r"\d{2}/\d{4}", text):
+        month, year = text.split("/")
+        return None, f"{year}-{month}"
+    return None, None
+
+
+def _candidate_signature(item: dict) -> tuple:
+    entreprise_sirens = tuple(
+        sorted(
+            {
+                _clean_text(str(company.get("siren") or ""))
+                for company in (item.get("entreprises") or [])
+                if _clean_text(str(company.get("siren") or ""))
+            }
+        )
+    )
+    return (
+        _normalize_for_match(item.get("nom_complet") or ""),
+        item.get("date_de_naissance") or item.get("date_de_naissance_rgpd") or "",
+        entreprise_sirens,
+    )
+
+
+def _dedupe_dirigeant_candidates(items: List[dict]) -> List[dict]:
+    seen = set()
+    out = []
+    for item in items:
+        signature = _candidate_signature(item)
+        if signature in seen:
+            continue
+        seen.add(signature)
+        out.append(item)
     return out
 
 
-def _run_recherche(nom: str, prenom_dirigeant: str) -> Tuple[List[dict], dict]:
+def _run_recherche_dirigeants_page(nom: str, prenom_dirigeant: str, page: int = 1) -> Tuple[List[dict], dict]:
     params = {
         "nom_dirigeant": nom,
         "prenom_dirigeant": prenom_dirigeant,
+        "page": page,
     }
 
-    data = _api_get("/recherche", params=params)
+    data = _api_get("/recherche-dirigeants", params=params)
     items = _extract_results_list(data)
-    print(f"[DEBUG] /recherche params={params} -> {len(items)} hit(s)")
+    print(f"[DEBUG] /recherche-dirigeants params={params} -> {len(items)} hit(s)")
 
     return items, {
         "query_params": params,
         "result_count": len(items),
+        "total": data.get("total"),
+        "page": data.get("page"),
     }
 
 
-def _search_companies_for_person(person: dict) -> Tuple[List[dict], List[dict]]:
-    nom = _clean_text(person.get("nom", ""))
-    prenoms = _clean_text(person.get("prenoms", ""))
-    premier_prenom = _first_prenom(prenoms)
+def _run_recherche_dirigeants(nom: str, prenom_dirigeant: str) -> Tuple[List[dict], dict]:
+    all_items: List[dict] = []
+    page_metas: List[dict] = []
+    seen_signatures = set()
+    page = 1
 
-    if not nom or not premier_prenom:
-        return [], []
+    while True:
+        items, meta = _run_recherche_dirigeants_page(nom, prenom_dirigeant, page=page)
+        page_metas.append(meta)
+        if not items:
+            break
 
-    debug_rows: List[dict] = []
+        new_item_count = 0
+        for item in items:
+            signature = _candidate_signature(item)
+            if signature in seen_signatures:
+                continue
+            seen_signatures.add(signature)
+            all_items.append(item)
+            new_item_count += 1
 
-    try:
-        items, meta = _run_recherche(nom, premier_prenom)
-        strategy = "nom_plus_premier_prenom"
-    except Exception as e:
-        print(f"[WARN] /recherche error for {nom} {premier_prenom}: {e}")
-        return [], []
+        total = meta.get("total")
+        if isinstance(total, int) and len(all_items) >= total:
+            break
+        if meta.get("result_count", 0) == 0:
+            break
+        if new_item_count == 0:
+            break
+        page += 1
 
-    if len(items) > MAX_RECHERCHE_RESULTS and prenoms and prenoms != premier_prenom:
-        try:
-            fallback_items, fallback_meta = _run_recherche(nom, prenoms)
-            items = fallback_items
-            strategy = "nom_plus_prenoms_complets"
-            meta = {
-                "initial_query": meta,
-                "fallback_query": fallback_meta,
-                "fallback_triggered": True,
-            }
-        except Exception as e:
-            print(f"[WARN] /recherche fallback error for {nom} {prenoms}: {e}")
-
-    company_rows: List[dict] = []
-
-    for item in items:
-        company_name = _extract_company_name(item)
-
-        if company_name:
-            company_rows.append({
-                "nom_societe": _clean_text(item.get("nom_entreprise") or company_name),
-                "siren": item.get("siren"),
-                "siret": (item.get("siege") or {}).get("siret"),
-                "statut": item.get("statut_consolide") or item.get("statut_rcs"),
-                "entreprise_cessee": item.get("entreprise_cessee"),
-                "activite": item.get("libelle_code_naf") or item.get("domaine_activite"),
-                "date_creation": item.get("date_creation_formate") or item.get("date_creation"),
-                "forme_juridique": item.get("forme_juridique"),
-                "capital": item.get("capital"),
-                "chiffre_affaires": item.get("chiffre_affaires"),
-                "resultat_net": item.get("resultat"),
-                "statut_rcs": item.get("statut_rcs"),
-                "nb_dirigeants_total": item.get("nb_dirigeants_total"),
-            })
-
-        debug_rows.append(
-            {
-                "strategy": strategy,
-                "meta": meta,
-                "societe": company_name,
-                "raw_keys": sorted(list(item.keys())),
-                "raw_item": item,
-            }
-        )
-
-    return _dedupe_company_rows(company_rows), debug_rows
+    return all_items, {
+        "query_params": {"nom_dirigeant": nom, "prenom_dirigeant": prenom_dirigeant},
+        "page_count": len(page_metas),
+        "result_count": len(all_items),
+        "pages": page_metas,
+    }
 
 
-def _fetch_entreprise(siren: str) -> Optional[dict]:
-    """Appelle /entreprise pour obtenir les détails (représentants, bénéficiaires)."""
-    if not siren or len(siren.strip()) != 9:
-        return None
-    try:
-        return _api_get("/entreprise", params={"siren": siren.strip()})
-    except PappersError as e:
-        print(f"[WARN] /entreprise error for siren={siren}: {e}")
-        return None
+def _run_recherche_by_siren(siren: str) -> Tuple[Optional[dict], dict]:
+    siren = _clean_text(str(siren or ""))
+    if len(siren) != 9:
+        return None, {"query_params": {"siren": siren}, "result_count": 0}
+
+    params = {"siren": siren}
+    data = _api_get("/recherche", params=params)
+    items = _extract_results_list(data)
+    exact_item = next(
+        (item for item in items if _clean_text(str(item.get("siren") or "")) == siren),
+        items[0] if items else None,
+    )
+    return exact_item, {
+        "query_params": params,
+        "result_count": len(items),
+    }
 
 
 def _normalize_for_match(value: str) -> str:
@@ -219,161 +257,235 @@ def _extract_name_candidates(*values: Optional[str]) -> set[str]:
     return candidates
 
 
-def _find_role_for_person(data: dict, person: dict) -> Optional[str]:
-    """Cherche le rôle de la personne dans les représentants de l'entreprise."""
-    representants = data.get("representants") or []
+def _candidate_matches_person_name(item: dict, person: dict) -> bool:
     nom_ref = _normalize_for_match(person.get("nom", ""))
     prenom_ref = _normalize_for_match(_first_prenom(person.get("prenoms", "")))
-
     if not nom_ref:
-        return None
-
-    for rep in representants:
-        nom_rep = _normalize_for_match(rep.get("nom") or rep.get("nom_complet") or "")
-        prenom_candidates = _extract_name_candidates(
-            rep.get("prenom"),
-            rep.get("prenom_usuel"),
-            rep.get("nom_complet"),
-        )
-
-        if nom_ref == nom_rep and (not prenom_ref or prenom_ref in prenom_candidates):
-            return _clean_text(rep.get("qualite") or rep.get("fonction") or "")
-
-    return None
-
-
-def _find_detention_for_person(data: dict, person: dict) -> Optional[str]:
-    """Cherche la détention dans les bénéficiaires effectifs."""
-    beneficiaires = data.get("beneficiaires_effectifs") or []
-    nom_ref = _normalize_for_match(person.get("nom", ""))
-    prenom_ref = _normalize_for_match(_first_prenom(person.get("prenoms", "")))
-
-    if not nom_ref:
-        return None
-
-    for benef in beneficiaires:
-        nom_b = _normalize_for_match(benef.get("nom") or "")
-        prenom_candidates = _extract_name_candidates(
-            benef.get("prenom"),
-            benef.get("prenom_usuel"),
-            benef.get("nom_complet"),
-        )
-
-        if nom_ref == nom_b and (not prenom_ref or prenom_ref in prenom_candidates):
-            parts = []
-            detention_directe = benef.get("pourcentage_parts")
-            detention_indirecte = benef.get("pourcentage_parts_indirectes")
-            detention_vd = benef.get("pourcentage_votes_directs")
-            if detention_directe is not None:
-                parts.append(f"{detention_directe}% parts")
-            if detention_indirecte is not None:
-                parts.append(f"{detention_indirecte}% indirect")
-            if detention_vd is not None and not parts:
-                parts.append(f"{detention_vd}% votes")
-            return " / ".join(parts) if parts else None
-
-    return None
-
-
-def _generate_commentaire(data: dict) -> Optional[str]:
-    """Génère un commentaire uniquement en cas d'anomalie forte."""
-    signals = []
-
-    # Procédure collective
-    procedures = data.get("procedures_collectives") or []
-    if procedures:
-        derniere = procedures[0]
-        type_proc = derniere.get("type") or "procédure collective"
-        signals.append(type_proc)
-
-    # Radiation effective
-    statut = (data.get("statut_rcs") or "").lower()
-    if "radi" in statut:
-        signals.append("Radiée du RCS")
-
-    return " | ".join(signals) if signals else None
-
-
-def _is_eponymous(company_name: str, person: dict) -> bool:
-    """Détecte si la société porte le nom de la personne (SCI DUPONT, DUPONT HOLDING, etc.)."""
-    nom_ref = _normalize_for_match(person.get("nom", ""))
-    nom_societe = _normalize_for_match(company_name)
-    if not nom_ref or not nom_societe:
         return False
-    # Le nom de famille constitue l'essentiel du nom de la société
-    cleaned = nom_societe.replace(nom_ref, "")
-    # Ce qui reste après retrait du nom : formes juridiques, mots génériques
-    filler = re.sub(r"(sci|sci|sarl|sas|sa|eurl|holding|groupe|invest|immo|gestion|conseil|patrimoine)", "", cleaned)
-    return len(filler) <= 3
+
+    nom_item = _normalize_for_match(item.get("nom") or item.get("nom_complet") or "")
+    prenom_candidates = _extract_name_candidates(
+        item.get("prenom"),
+        item.get("prenom_usuel"),
+        item.get("nom_complet"),
+    )
+    return nom_ref == nom_item and (not prenom_ref or prenom_ref in prenom_candidates)
 
 
-def _should_enrich(company: dict, person: dict) -> bool:
-    """Filtre les sociétés à enrichir via /entreprise (coût x10 vs /recherche)."""
-    statut_rcs = (company.get("statut_rcs") or "").lower()
-    return statut_rcs == "inscrit"
+def _select_dirigeant_candidates(items: List[dict], person: dict) -> Tuple[List[dict], str]:
+    if not items:
+        return [], "aucun_resultat"
+
+    named_candidates = [item for item in items if _candidate_matches_person_name(item, person)]
+    candidates = named_candidates or items
+
+    target_exact, target_rgpd = _normalize_birthdate(person.get("date_naissance"))
+
+    if target_exact:
+        exact_matches = [
+            item
+            for item in candidates
+            if _normalize_birthdate(item.get("date_de_naissance"))[0] == target_exact
+        ]
+        if exact_matches:
+            # Pappers peut éclater un même dirigeant en plusieurs fiches :
+            # une avec la date complète, d'autres avec seulement YYYY-MM.
+            # Quand on a une date exacte fiable, on réagrège les fiches
+            # name-matched qui partagent le même mois/année.
+            if target_rgpd:
+                merged_matches = list(exact_matches)
+                for item in candidates:
+                    if item in exact_matches:
+                        continue
+                    _, item_rgpd = _normalize_birthdate(item.get("date_de_naissance"))
+                    if not item_rgpd:
+                        _, item_rgpd = _normalize_birthdate(item.get("date_de_naissance_rgpd"))
+                    if item_rgpd == target_rgpd:
+                        merged_matches.append(item)
+                return _dedupe_dirigeant_candidates(merged_matches), "date_de_naissance_plus_rgpd"
+
+            return exact_matches, "date_de_naissance"
+
+    if target_rgpd:
+        rgpd_matches = []
+        for item in candidates:
+            item_exact, item_rgpd = _normalize_birthdate(item.get("date_de_naissance"))
+            if not item_rgpd:
+                _, item_rgpd = _normalize_birthdate(item.get("date_de_naissance_rgpd"))
+            if item_rgpd == target_rgpd:
+                rgpd_matches.append(item)
+        if rgpd_matches:
+            return rgpd_matches, "date_de_naissance_rgpd"
+
+    if len(candidates) == 1:
+        return candidates, "candidat_unique"
+
+    return [], "aucun_match_fiable"
 
 
-def _enrich_companies_with_details(
-    companies: List[dict],
+def _extract_role_from_company_stub(company_stub: dict, dirigeant_item: dict) -> Optional[str]:
+    nested_dirigeant = company_stub.get("dirigeant") or {}
+    qualites = nested_dirigeant.get("qualites") or dirigeant_item.get("qualites") or []
+    if isinstance(qualites, list):
+        values = [_clean_text(value) for value in qualites if _clean_text(value)]
+        if values:
+            return " / ".join(dict.fromkeys(values))
+
+    return _clean_text(
+        nested_dirigeant.get("qualite")
+        or dirigeant_item.get("qualite")
+        or ""
+    ) or None
+
+
+def _build_company_row_from_sources(company_stub: dict, company_detail: Optional[dict], dirigeant_item: dict) -> dict:
+    base = company_detail or {}
+    company_name = _clean_text(
+        base.get("nom_entreprise")
+        or _extract_company_name(base)
+        or company_stub.get("nom_entreprise")
+        or company_stub.get("denomination")
+        or ""
+    )
+
+    base_siege = base.get("siege") or {}
+    stub_siege = company_stub.get("siege") or {}
+
+    return {
+        "nom_societe": company_name,
+        "siren": _clean_text(str(base.get("siren") or company_stub.get("siren") or "")) or None,
+        "siret": base_siege.get("siret") or stub_siege.get("siret"),
+        "entreprise_cessee": base.get("entreprise_cessee", company_stub.get("entreprise_cessee")),
+        "forme_juridique": base.get("forme_juridique") or company_stub.get("forme_juridique"),
+        "statut": base.get("statut_consolide") or base.get("statut_rcs") or company_stub.get("statut_consolide") or company_stub.get("statut_rcs"),
+        "activite": base.get("libelle_code_naf") or base.get("domaine_activite") or company_stub.get("libelle_code_naf") or company_stub.get("domaine_activite"),
+        "date_creation": base.get("date_creation_formate") or base.get("date_creation") or company_stub.get("date_creation_formate") or company_stub.get("date_creation"),
+        "capital": base.get("capital"),
+        "chiffre_affaires": base.get("chiffre_affaires"),
+        "resultat_net": base.get("resultat") if base.get("resultat") is not None else base.get("resultat_net"),
+        "statut_rcs": base.get("statut_rcs") or company_stub.get("statut_rcs"),
+        "nb_dirigeants_total": base.get("nb_dirigeants_total") or company_stub.get("nb_dirigeants_total"),
+        "role": _extract_role_from_company_stub(company_stub, dirigeant_item),
+        "detention": None,
+        "commentaires": None,
+    }
+
+
+def _search_companies_for_person(
     person: dict,
-    entreprise_cache: Optional[Dict[str, Optional[dict]]] = None,
-) -> List[dict]:
-    """Enrichit chaque société avec role/detention/commentaires via /entreprise."""
-    enriched = []
-    skipped = 0
-    for company in companies:
-        siren = (company.get("siren") or "").strip()
-        role = None
-        detention = None
-        commentaires = None
+    recherche_cache: Optional[Dict[str, Optional[dict]]] = None,
+) -> Tuple[List[dict], dict]:
+    nom = _clean_text(person.get("nom", ""))
+    prenoms = _clean_text(person.get("prenoms", ""))
+    premier_prenom = _first_prenom(prenoms)
 
-        if siren and _should_enrich(company, person):
-            data = None
-            if entreprise_cache is not None and siren in entreprise_cache:
-                data = entreprise_cache[siren]
-            else:
-                data = _fetch_entreprise(siren)
-                if entreprise_cache is not None:
-                    entreprise_cache[siren] = data
-            if data:
-                role = _find_role_for_person(data, person)
-                detention = _find_detention_for_person(data, person)
-                commentaires = _generate_commentaire(data)
-        elif siren:
-            skipped += 1
+    if not nom or not premier_prenom:
+        return [], {
+            "input_person": person,
+            "selection_mode": "nom_ou_prenom_manquant",
+            "dirigeants": [],
+            "recherche_siren": {},
+        }
 
-        enriched.append({
-            **company,
-            "role": role,
-            "detention": detention,
-            "commentaires": commentaires,
-        })
+    try:
+        dirigeant_items, meta = _run_recherche_dirigeants(nom, premier_prenom)
+        strategy = "nom_plus_premier_prenom"
+    except Exception as exc:
+        print(f"[WARN] /recherche-dirigeants error for {nom} {premier_prenom}: {exc}")
+        return [], {
+            "input_person": person,
+            "selection_mode": "erreur_recherche_dirigeants",
+            "error": str(exc),
+            "dirigeants": [],
+            "recherche_siren": {},
+        }
 
-    if skipped:
-        nom = _clean_text(person.get("nom", ""))
-        print(f"[INFO] {nom}: {skipped} société(s) ignorée(s) pour /entreprise (cessée ou éponyme)")
+    if not dirigeant_items and prenoms and prenoms != premier_prenom:
+        try:
+            dirigeant_items, fallback_meta = _run_recherche_dirigeants(nom, prenoms)
+            strategy = "nom_plus_prenoms_complets"
+            meta = {
+                "initial_query": meta,
+                "fallback_query": fallback_meta,
+                "fallback_triggered": True,
+            }
+        except Exception as exc:
+            print(f"[WARN] /recherche-dirigeants fallback error for {nom} {prenoms}: {exc}")
 
-    return enriched
+    selected_candidates, selection_mode = _select_dirigeant_candidates(dirigeant_items, person)
+    selected_signatures = {_candidate_signature(item) for item in selected_candidates}
+
+    recherche_by_siren_meta: Dict[str, dict] = {}
+    company_rows: List[dict] = []
+
+    for dirigeant_item in selected_candidates:
+        for company_stub in dirigeant_item.get("entreprises") or []:
+            siren = _clean_text(str(company_stub.get("siren") or ""))
+            company_detail = None
+            if len(siren) == 9:
+                if recherche_cache is not None and siren in recherche_cache:
+                    company_detail = recherche_cache[siren]
+                else:
+                    try:
+                        company_detail, siren_meta = _run_recherche_by_siren(siren)
+                    except Exception as exc:
+                        company_detail = None
+                        siren_meta = {"query_params": {"siren": siren}, "error": str(exc)}
+                        print(f"[WARN] /recherche error for siren={siren}: {exc}")
+                    if recherche_cache is not None:
+                        recherche_cache[siren] = company_detail
+                    recherche_by_siren_meta[siren] = siren_meta
+
+            company_rows.append(
+                _build_company_row_from_sources(company_stub, company_detail, dirigeant_item)
+            )
+
+    debug_payload = {
+        "input_person": person,
+        "strategy": strategy,
+        "selection_mode": selection_mode,
+        "query_meta": meta,
+        "dirigeants": [
+            {
+                "selected": _candidate_signature(item) in selected_signatures,
+                "nom_complet": item.get("nom_complet"),
+                "date_de_naissance": item.get("date_de_naissance"),
+                "date_de_naissance_rgpd": item.get("date_de_naissance_rgpd"),
+                "age": item.get("age"),
+                "nb_entreprises_total": item.get("nb_entreprises_total"),
+                "entreprises": [
+                    {
+                        "siren": company.get("siren"),
+                        "nom_entreprise": company.get("nom_entreprise") or company.get("denomination"),
+                        "role": _extract_role_from_company_stub(company, item),
+                    }
+                    for company in (item.get("entreprises") or [])
+                ],
+            }
+            for item in dirigeant_items
+        ],
+        "recherche_siren": recherche_by_siren_meta,
+    }
+
+    return _dedupe_company_rows(company_rows), debug_payload
 
 
-def enrich_people(people: List[dict]) -> Tuple[Dict[str, List[dict]], Dict[str, List[dict]]]:
+def enrich_people(people: List[dict]) -> Tuple[Dict[str, List[dict]], Dict[str, dict]]:
     results: Dict[str, List[dict]] = {}
-    debug_payload: Dict[str, List[dict]] = {}
-    entreprise_cache: Dict[str, Optional[dict]] = {}
+    debug_payload: Dict[str, dict] = {}
+    recherche_cache: Dict[str, Optional[dict]] = {}
 
     for person in people:
         nom = _clean_text(person.get("nom", ""))
         prenoms = _clean_text(person.get("prenoms", ""))
         display_name = f"{nom} {prenoms}".strip()
 
-        companies, debug_rows = _search_companies_for_person(person)
-        companies = _enrich_companies_with_details(
-            companies,
+        companies, person_debug = _search_companies_for_person(
             person,
-            entreprise_cache=entreprise_cache,
+            recherche_cache=recherche_cache,
         )
         results[display_name] = companies
-        debug_payload[display_name] = debug_rows
+        debug_payload[display_name] = person_debug
 
     return results, debug_payload
 

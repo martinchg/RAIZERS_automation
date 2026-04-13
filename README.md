@@ -46,17 +46,23 @@ Envoie les documents au LLM pour extraire les champs métier. Résultat dans `ex
 python run.py mandats --project raizers-en-audit-nom-du-projet
 ```
 
-Extrait les personnes depuis les casiers judiciaires, recherche leurs sociétés via Pappers (`/recherche`), puis enrichit chaque société active via `/entreprise` (rôle, détention, commentaires). Résultat dans `mandats_results.json`.
+Extrait les personnes depuis les casiers judiciaires, identifie la bonne personne via Pappers (`/recherche-dirigeants`) en s'appuyant sur le nom/prénom et la date de naissance quand elle est disponible, puis enrichit chaque société via `/recherche` avec le `SIREN`. Le rôle du dirigeant provient de `/recherche-dirigeants`. Résultat dans `mandats_results.json`.
 
 ### 4. Fill — Génération du rapport Excel
 
 ```bash
-python run.py fill --results output/raizers-en-audit-signature/extraction_results.json
+python run.py fill --project raizers-en-audit-signature
 ```
 
 Génère `rapport.xlsx` avec 3 onglets (Opération, Patrimoine, Mandats). Charge automatiquement `mandats_results.json` s'il est présent dans le même dossier.
 
 Option utile :
+
+```bash
+python run.py fill --results output/raizers-en-audit-signature/extraction_results.json
+```
+
+Options avancées :
 
 ```bash
 python run.py fill \

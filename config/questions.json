@@ -154,7 +154,7 @@
       "excel_cell": "D10",
       "excel_sheet": "Opération",
       "type": "string",
-      "format_hint": "Texte lisible sans JSON, ex: SIGNATURE - Président ; CACCHIOLI Juliette - Personne ayant le pouvoir de diriger, gérer ou engager à titre habituel",
+      "format_hint": "Texte lisible sans JSON, ex: SIGNATURE - Président ; CHASSAING Martin - Personne ayant le pouvoir de diriger, gérer ou engager à titre habituel",
       "context_hint": "Dirigeants de la société emprunteuse (président, gérant, DG). Le président peut être une personne morale.",
       "source_dirs": [
         "*Audit/*Opérateur/*Eléments juridiques/Société Emprunteuse"
@@ -312,7 +312,7 @@
       "excel_cell": "D19",
       "excel_sheet": "Opération",
       "type": "string",
-      "format_hint": "Texte lisible sans JSON, ex: SIGNATURE - Président ; CACCHIOLI Juliette - Personne ayant le pouvoir de diriger, gérer ou engager à titre habituel",
+      "format_hint": "Texte lisible sans JSON, ex: SIGNATURE - Président ; CHASSAING Martin - Personne ayant le pouvoir de diriger, gérer ou engager à titre habituel",
       "context_hint": "Dirigeants de la société opération. Le président peut être une personne morale.",
       "source_dirs": [
         "*Audit/*Opérateur/*Eléments juridiques/Société Opération",
@@ -348,6 +348,7 @@
         "PV",
         "procès verbal",
         "adresse du projet",
+        "contrat obligataire",
         "devis",
         "financement"
       ]
@@ -364,7 +365,10 @@
       "hint_keywords": [
         "contrat obligataire",
         "contrat",
-        "obligation"
+        "obligation",
+        "taux",
+        "intérêt",
+        "coupon"
       ]
     },
     {
@@ -379,7 +383,11 @@
       "hint_keywords": [
         "contrat obligataire",
         "contrat",
-        "obligation"
+        "obligation",
+        "montant de l'emprunt",
+        "montant de la collecte",
+        "montant de l'émission",
+        "montant total"
       ]
     },
     {
@@ -393,7 +401,10 @@
       "hint_keywords": [
         "contrat obligataire",
         "contrat",
-        "obligation"
+        "obligation",
+        "maturité",
+        "durée",
+        "échéance"
       ]
     },
     {

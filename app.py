@@ -220,6 +220,37 @@ def _append_audit_history(entry: dict, max_entries: int = 25) -> None:
     )
 
 
+def _remember_latest_excel(excel_path: Path | None, project_name: str) -> None:
+    if not excel_path or not excel_path.exists():
+        return
+    st.session_state["latest_excel_path"] = str(excel_path)
+    st.session_state["latest_excel_project_name"] = project_name
+
+
+def _get_latest_excel_info() -> tuple[Path | None, str]:
+    session_excel_path = st.session_state.get("latest_excel_path")
+    session_project_name = st.session_state.get("latest_excel_project_name", "")
+    if session_excel_path:
+        excel_path = Path(session_excel_path)
+        if excel_path.exists():
+            return excel_path, session_project_name
+
+    for entry in _load_audit_history():
+        project_id = entry.get("project_id")
+        if not project_id:
+            continue
+        excel_path = OUTPUT_DIR / project_id / "rapport.xlsx"
+        if excel_path.exists():
+            return excel_path, entry.get("project_name", project_id)
+
+    return None, ""
+
+
+def _reset_audit_subfolder_selection() -> None:
+    st.session_state.pop("selected_audit_subfolder", None)
+    st.session_state.pop("_audit_subfolder_project_path", None)
+
+
 def _render_audit_history() -> None:
     history = _load_audit_history()[:5]
     if not history:
@@ -558,6 +589,7 @@ if st.session_state.dbx_folders:
             st.session_state.dbx_folders,
             label_visibility="collapsed",
             key="selected_project_name",
+            on_change=_reset_audit_subfolder_selection,
         )
     selected_path = f"{DROPBOX_ROOT}/{selected_project}"
 else:
@@ -644,6 +676,19 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 _render_audit_history()
+
+latest_excel_path, latest_excel_project_name = _get_latest_excel_info()
+if latest_excel_path and latest_excel_path.exists():
+    st.caption(f"Dernier rapport disponible : {latest_excel_project_name}")
+    with open(latest_excel_path, "rb") as f:
+        st.download_button(
+            label="Telecharger le dernier rapport Excel",
+            data=f.read(),
+            file_name=f"rapport_{latest_excel_project_name}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            key="download_latest_excel",
+        )
 
 # --- Lancement ---
 st.markdown("<br>", unsafe_allow_html=True)
@@ -894,6 +939,7 @@ if st.button("Lancer l'audit", type="primary", use_container_width=True):
             "summary": results_summary,
         }
     )
+    _remember_latest_excel(project_dir / "rapport.xlsx", project_name)
 
     st.markdown("<br>", unsafe_allow_html=True)
 

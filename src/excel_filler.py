@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 HEADER_FONT = Font(bold=True, size=11, color="FFFFFF")
 HEADER_FILL = PatternFill(start_color="2F5496", end_color="2F5496", fill_type="solid")
+RADIATED_ROW_FILL = PatternFill(start_color="E6E6E6", end_color="E6E6E6", fill_type="solid")
 HEADER_ALIGNMENT = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
 LABEL_FONT = Font(bold=True, size=10)
@@ -304,6 +305,12 @@ def _build_statut(company: dict) -> Optional[str]:
         return None
 
     return " | ".join(parts)
+
+
+def _is_radiated_company(company: dict) -> bool:
+    statut = canonical_name(str(company.get("statut") or ""))
+    statut_rcs = canonical_name(str(company.get("statut_rcs") or ""))
+    return "radie" in statut or "radie" in statut_rcs
 
 
 # ---------------------------------------------------------------------------
@@ -1286,12 +1293,15 @@ def _build_mandats_sheet(wb: Workbook, pappers_mandats: Dict):
 
             nom = (company.get("nom_societe") or company.get("societe") or "").strip()
             statut_rcs = (company.get("statut_rcs") or "").strip().lower()
+            row_fill = RADIATED_ROW_FILL if _is_radiated_company(company) else None
             role_value = company.get("role")
             if statut_rcs and statut_rcs != "inscrit" and not role_value:
                 role_value = "X"
 
             cell = ws.cell(row=row, column=2, value=nom)
             cell.border = THIN_BORDER
+            if row_fill:
+                cell.fill = row_fill
 
             url = _build_pappers_company_url(company)
             if url:
@@ -1316,6 +1326,8 @@ def _build_mandats_sheet(wb: Workbook, pappers_mandats: Dict):
                 c = ws.cell(row=row, column=3 + col_idx, value=display_val)
                 c.font = VALUE_FONT
                 c.border = THIN_BORDER
+                if row_fill:
+                    c.fill = row_fill
                 _apply_numeric_format(c, val)
                 if val:
                     filled += 1
@@ -1409,6 +1421,20 @@ def main() -> None:
     questions_path = Path(args.questions)
     output_dir = Path(args.output_dir) if args.output_dir else results_path.parent
     manifest_path = output_dir / "manifest.json"
+
+    if not results_path.exists():
+        project_hint = output_dir.name if output_dir.name else None
+        hint = (
+            f" Lance d'abord `python run.py extract --project {project_hint}` puis relance `fill`."
+            if project_hint
+            else ""
+        )
+        raise FileNotFoundError(
+            f"extraction_results.json introuvable: {results_path}.{hint}"
+        )
+
+    if not questions_path.exists():
+        raise FileNotFoundError(f"questions.json introuvable: {questions_path}")
 
     extraction_data = json.loads(results_path.read_text(encoding="utf-8"))
     questions_data = json.loads(questions_path.read_text(encoding="utf-8"))
