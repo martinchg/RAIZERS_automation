@@ -38,6 +38,13 @@ SECTION_FONT = Font(bold=True, size=11, color="2F5496")
 NUMBER_FORMAT_INTEGER = '# ##0'
 NUMBER_FORMAT_DECIMAL = '# ##0.00'
 
+_OPERATION_FIXED_ROWS_AFTER = {
+    "montant_collecte": [
+        ("Montant d'une obligation", "1"),
+        ("Ticket Minimum", "1 000"),
+    ]
+}
+
 
 def _style_header_row(ws, row: int, max_col: int):
     for col in range(1, max_col + 1):
@@ -392,6 +399,17 @@ def _build_operation_sheet(wb: Workbook, results: Dict, fields: List[Dict]):
         if value:
             filled += 1
 
+        for fixed_label, fixed_value in _OPERATION_FIXED_ROWS_AFTER.get(field_id, []):
+            row += 1
+
+            ws.cell(row=row, column=2, value=fixed_label).font = LABEL_FONT
+            ws.cell(row=row, column=2).border = THIN_BORDER
+
+            fixed_val_cell = ws.cell(row=row, column=3, value=fixed_value)
+            fixed_val_cell.font = VALUE_FONT
+            fixed_val_cell.border = THIN_BORDER
+            fixed_val_cell.alignment = Alignment(wrap_text=True)
+
         row += 1
 
     logger.info(f"  Opération : {filled} valeurs remplies")
@@ -551,8 +569,10 @@ def _resolve_company_sheets(results: Dict) -> List[Tuple[str, str]]:
 _BILAN_ACTIF_ROWS = [
     ("Immobilisations corporelles", "immobilisations_corporelles"),
     ("Immobilisations financières", "immobilisations_financieres"),
+    ("Stocks", "stocks"),
     ("Créances", "creances"),
     ("Trésorerie", "tresorerie"),
+    ("Autres éléments d'actif", "autres_actif"),
 ]
 
 _BILAN_PASSIF_DETAIL_ROWS = [
@@ -565,10 +585,10 @@ _BILAN_PASSIF_ROWS = [
     ("Dettes financières", "dettes_financieres"),
     ("Dettes d'exploitation", "dettes_exploitation"),
     ("Dettes diverses", "dettes_diverses"),
+    ("Autres éléments de passif", "autres_passif"),
 ]
 
 _BILAN_EXTRA_ROWS = [
-    ("Comptes courants d'associés", "comptes_courants"),
     ("Dettes bancaires", "dettes_bancaires"),
     ("Chiffre d'affaires", "chiffre_affaires"),
 ]
@@ -576,6 +596,7 @@ _BILAN_EXTRA_ROWS = [
 _BILAN_LEGACY_FIELD_BASES = {
     "immobilisations_corporelles": "bilan_immobilisations_corporelles",
     "immobilisations_financieres": "bilan_immobilisations_financieres",
+    "stocks": "bilan_stocks",
     "creances": "bilan_creances",
     "tresorerie": "bilan_tresorerie",
     "capital_social": "bilan_capital_social",
@@ -584,7 +605,6 @@ _BILAN_LEGACY_FIELD_BASES = {
     "dettes_financieres": "bilan_dettes_financieres",
     "dettes_exploitation": "bilan_dettes_exploitation",
     "dettes_diverses": "bilan_dettes_diverses",
-    "comptes_courants": "bilan_comptes_courants",
     "dettes_bancaires": "bilan_dettes_bancaires",
     "chiffre_affaires": "bilan_chiffre_affaires",
 }
@@ -594,11 +614,29 @@ _BILAN_TABLE_KEY_ALIASES = {
     "immobilisationscorporellesnet": "immobilisations_corporelles",
     "immobilisationsfinancieres": "immobilisations_financieres",
     "immobilisationsfinancieresnet": "immobilisations_financieres",
+    "stocks": "stocks",
+    "stock": "stocks",
+    "stocksetencours": "stocks",
+    "stocksencours": "stocks",
     "creances": "creances",
     "creancesnet": "creances",
+    "creancesclients": "creances_clients",
+    "clientsetcomptesrattaches": "creances_clients",
+    "autrescreances": "autres_creances",
     "tresorerie": "tresorerie",
-    "disponibilites": "tresorerie",
-    "tresoreriedisponibilites": "tresorerie",
+    "disponibilites": "disponibilites",
+    "tresoreriedisponibilites": "disponibilites",
+    "vmp": "vmp",
+    "valeursmobilieresdeplacement": "vmp",
+    "chargesconstateesdavance": "charges_constatees_avance",
+    "autresactifresiduel": "autres_actif_residuel",
+    "autresactif": "autres_actif",
+    "autreselementsdactif": "autres_actif",
+    "autrespostesdactif": "autres_actif",
+    "avancesetacomptesversessurcommandes": "autres_actif_residuel",
+    "capitalsouscritappelenonverse": "autres_actif_residuel",
+    "totalactif": "total_actif",
+    "totalgeneralactif": "total_actif",
     "capitalsocial": "capital_social",
     "resultatexercice": "resultat_exercice",
     "resultatnet": "resultat_exercice",
@@ -607,12 +645,32 @@ _BILAN_TABLE_KEY_ALIASES = {
     "dettesdexploitation": "dettes_exploitation",
     "dettesexploitation": "dettes_exploitation",
     "dettesdiverses": "dettes_diverses",
-    "comptescourants": "comptes_courants",
-    "comptescourantsassocies": "comptes_courants",
-    "comptescourantsdassocies": "comptes_courants",
-    "cca": "comptes_courants",
+    "autresdettes": "dettes_diverses",
+    "fournisseurs": "fournisseurs",
+    "fournisseursetcomptesrattaches": "fournisseurs",
+    "dettesfiscalesetsociales": "dettes_fiscales_sociales",
+    "dettesfiscalessociales": "dettes_fiscales_sociales",
+    "comptescourants": "autres_dettes_financieres",
+    "comptescourantsassocies": "autres_dettes_financieres",
+    "comptescourantsdassocies": "autres_dettes_financieres",
+    "cca": "autres_dettes_financieres",
     "dettesbancaires": "dettes_bancaires",
+    "empruntsetdettesaupresdesetablissementsdecredit": "dettes_bancaires",
     "empruntsbancaires": "dettes_bancaires",
+    "autresdettesfinancieres": "autres_dettes_financieres",
+    "empruntsetdettesfinancieresdivers": "autres_dettes_financieres",
+    "empruntsetdettesfinancieresdiverses": "autres_dettes_financieres",
+    "autresempruntsobligataires": "autres_dettes_financieres",
+    "empruntsobligatairesconvertibles": "autres_dettes_financieres",
+    "provisionspourrisques": "provisions_pour_risques",
+    "provisionspourcharges": "provisions_pour_charges",
+    "produitsconstatesdavance": "produits_constates_avance",
+    "autrespassifresiduel": "autres_passif_residuel",
+    "autrespassif": "autres_passif",
+    "autreselementsdepassif": "autres_passif",
+    "autrespostesdepassif": "autres_passif",
+    "totalpassif": "total_passif",
+    "totalgeneralpassif": "total_passif",
     "chiffredaffaires": "chiffre_affaires",
     "ca": "chiffre_affaires",
 }
@@ -629,6 +687,7 @@ _COMPTE_RESULTAT_ROWS = [
     ("Salaires et charges sociales", "salaires_charges_sociales"),
     ("Impôts et taxes", "impots_taxes"),
     ("Dotations aux amortissements", "dotations"),
+    ("Autres éléments", "autres_elements"),
     ("Résultat financier", "resultat_financier"),
     ("Résultat exceptionnel", "resultat_exceptionnel"),
     ("Impôts sur les sociétés", "impots_sur_les_societes"),
@@ -643,13 +702,44 @@ _COMPTE_RESULTAT_TABLE_KEY_ALIASES = {
     "chiffreaffaires": "chiffre_affaires",
     "ca": "chiffre_affaires",
     "charges": "charges",
-    "chargesexternes": "charges",
+    "achatsetmarchandises": "achats_marchandises",
+    "achatsdemarchandises": "achats_marchandises",
+    "variationdestockmarchandises": "variation_stock_marchandises",
+    "variationdestockdesmarchandises": "variation_stock_marchandises",
+    "achatsdematierespremieresetautresapprovisionnements": "achats_matieres_premieres",
+    "achatsmatierespremieresetautresapprovisionnements": "achats_matieres_premieres",
+    "variationdestockmatierespremieresetapprovisionnements": "variation_stock_matieres_premieres",
+    "variationdestockdesmatierespremieresetapprovisionnements": "variation_stock_matieres_premieres",
+    "autresachatsetchargesexternes": "autres_charges_externes",
+    "autresachatschargesexternes": "autres_charges_externes",
+    "chargesexternes": "autres_charges_externes",
+    "achatsetchargesexternes": "autres_charges_externes",
+    "achatschargesexternes": "autres_charges_externes",
+    "achatsetapprovisionnements": "autres_charges_externes",
     "salairesetchargessociales": "salaires_charges_sociales",
     "salaireschargessociales": "salaires_charges_sociales",
     "salairescharges": "salaires_charges_sociales",
+    "salaires": "salaires",
+    "salairesettraitements": "salaires",
+    "remunerationsdupersonnel": "salaires",
+    "chargessociales": "charges_sociales",
     "impotsettaxes": "impots_taxes",
     "dotations": "dotations",
-    "dotationsauxamortissements": "dotations",
+    "dotationsauxamortissements": "dotations_amortissements",
+    "dotationsauxprovisions": "dotations_provisions",
+    "autreselements": "autres_elements",
+    "productionstockee": "production_stockee",
+    "subventionsdexploitation": "subventions_exploitation",
+    "reprisesuramortissementsetprovisionstransfertsdecharges": "reprises_exploitation",
+    "reprisesuramortissementsetprovision": "reprises_exploitation",
+    "autresproduits": "autres_produits_exploitation",
+    "autrescharges": "autres_charges_exploitation",
+    "autreschargesdexploitation": "autres_charges_exploitation",
+    "autreschargesexploitation": "autres_charges_exploitation",
+    "autresproduitsdexploitation": "autres_produits_exploitation",
+    "autresproduitsexploitation": "autres_produits_exploitation",
+    "resultatexploitation": "resultat_exploitation",
+    "resultatdexploitation": "resultat_exploitation",
     "resultatfinancier": "resultat_financier",
     "resultatexceptionnel": "resultat_exceptionnel",
     "impotssurlessocietes": "impots_sur_les_societes",
@@ -711,12 +801,113 @@ def _get_bilan_table_field(row_data: Dict, target: str):
     return None
 
 
+_BILAN_COMPONENT_KEYS = {
+    "creances": ["creances_clients", "autres_creances"],
+    "tresorerie": ["disponibilites", "vmp"],
+    "autres_actif": ["charges_constatees_avance", "autres_actif_residuel"],
+    "dettes_exploitation": ["fournisseurs", "dettes_fiscales_sociales"],
+    "dettes_financieres": ["dettes_bancaires", "autres_dettes_financieres"],
+    "autres_passif": ["provisions_pour_risques", "provisions_pour_charges", "produits_constates_avance", "autres_passif_residuel"],
+}
+
+_COMPTE_RESULTAT_COMPONENT_KEYS = {
+    "charges": [
+        "achats_marchandises",
+        "variation_stock_marchandises",
+        "achats_matieres_premieres",
+        "variation_stock_matieres_premieres",
+        "autres_charges_externes",
+    ],
+    "salaires_charges_sociales": ["salaires", "charges_sociales"],
+    "dotations": ["dotations_amortissements", "dotations_provisions"],
+    "autres_elements": [
+        "production_stockee",
+        "subventions_exploitation",
+        "reprises_exploitation",
+        "autres_produits_exploitation",
+        "autres_charges_exploitation",
+    ],
+}
+
+
+def _sum_component_values(table_lookup: Dict[str, Dict], keys: List[str], period: str, subtract_keys: Optional[set[str]] = None):
+    values = []
+    present_keys = []
+    subtract_keys = subtract_keys or set()
+    for key in keys:
+        row_data = table_lookup.get(key)
+        if not row_data:
+            continue
+        value = _to_number(_get_bilan_table_field(row_data, period))
+        if value is None:
+            continue
+        present_keys.append(key)
+        values.append(-value if key in subtract_keys else value)
+
+    if not values:
+        return None, present_keys
+
+    total = sum(values)
+    return int(total) if float(total).is_integer() else total, present_keys
+
+
+def _resolve_aggregated_value(
+    direct_value,
+    table_lookup: Dict[str, Dict],
+    component_keys: List[str],
+    period: str,
+    subtract_keys: Optional[set[str]] = None,
+):
+    component_total, present_keys = _sum_component_values(
+        table_lookup,
+        component_keys,
+        period,
+        subtract_keys=subtract_keys,
+    )
+    if len(present_keys) == len(component_keys):
+        return component_total
+    if direct_value is not None:
+        return direct_value
+    return component_total
+
+
+def _resolve_aggregated_comment(
+    direct_comment: Optional[str],
+    table_lookup: Dict[str, Dict],
+    component_keys: List[str],
+    subtract_keys: Optional[set[str]] = None,
+) -> Optional[str]:
+    subtract_keys = subtract_keys or set()
+    present_parts: List[str] = []
+    for key in component_keys:
+        row_data = table_lookup.get(key)
+        if not row_data:
+            continue
+        value = _to_number(_get_bilan_table_field(row_data, "n"))
+        value_n1 = _to_number(_get_bilan_table_field(row_data, "n1"))
+        if value is None and value_n1 is None:
+            continue
+        prefix = "-" if key in subtract_keys else "+"
+        present_parts.append(f"{prefix}{key}")
+
+    if len(present_parts) == len(component_keys):
+        formula = " ".join(present_parts).lstrip("+")
+        return f"Calcul Python: {formula}"
+    return direct_comment
+
+
 def _get_bilan_value(results: Dict, suffix: str, table_lookup: Dict[str, Dict], key: str, period: str):
     row_data = table_lookup.get(key)
+    direct_value = None
     if row_data:
-        value = _get_bilan_table_field(row_data, period)
-        if value is not None:
-            return value
+        direct_value = _get_bilan_table_field(row_data, period)
+
+    component_keys = _BILAN_COMPONENT_KEYS.get(key)
+    if component_keys:
+        return _resolve_aggregated_value(direct_value, table_lookup, component_keys, period)
+
+    if direct_value is not None:
+        return direct_value
 
     legacy_base = _BILAN_LEGACY_FIELD_BASES.get(key)
     if not legacy_base:
@@ -726,22 +917,49 @@ def _get_bilan_value(results: Dict, suffix: str, table_lookup: Dict[str, Dict], 
 
 def _get_bilan_comment(table_lookup: Dict[str, Dict], key: str) -> Optional[str]:
     row_data = table_lookup.get(key)
-    if not row_data:
-        return None
-    value = _get_bilan_table_field(row_data, "commentaires")
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
+    direct_comment = None
+    if row_data:
+        value = _get_bilan_table_field(row_data, "commentaires")
+        if value is not None:
+            text = str(value).strip()
+            direct_comment = text or None
+
+    component_keys = _BILAN_COMPONENT_KEYS.get(key)
+    if component_keys:
+        return _resolve_aggregated_comment(direct_comment, table_lookup, component_keys)
+
+    return direct_comment
 
 
 def _get_metric_value(results: Dict, suffix: str, table_lookup: Dict[str, Dict], key: str, period: str,
                       legacy_field_bases: Dict[str, str]):
     row_data = table_lookup.get(key)
+    direct_value = None
     if row_data:
-        value = _get_bilan_table_field(row_data, period)
-        if value is not None:
-            return value
+        direct_value = _get_bilan_table_field(row_data, period)
+
+    component_keys = _COMPTE_RESULTAT_COMPONENT_KEYS.get(key)
+    if component_keys:
+        subtract_keys = (
+            {
+                "production_stockee",
+                "subventions_exploitation",
+                "reprises_exploitation",
+                "autres_produits_exploitation",
+            }
+            if key == "autres_elements"
+            else None
+        )
+        return _resolve_aggregated_value(
+            direct_value,
+            table_lookup,
+            component_keys,
+            period,
+            subtract_keys=subtract_keys,
+        )
+
+    if direct_value is not None:
+        return direct_value
 
     legacy_base = legacy_field_bases.get(key)
     if not legacy_base:
@@ -751,13 +969,33 @@ def _get_metric_value(results: Dict, suffix: str, table_lookup: Dict[str, Dict],
 
 def _get_metric_comment(table_lookup: Dict[str, Dict], key: str) -> Optional[str]:
     row_data = table_lookup.get(key)
-    if not row_data:
-        return None
-    value = _get_bilan_table_field(row_data, "commentaires")
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
+    direct_comment = None
+    if row_data:
+        value = _get_bilan_table_field(row_data, "commentaires")
+        if value is not None:
+            text = str(value).strip()
+            direct_comment = text or None
+
+    component_keys = _COMPTE_RESULTAT_COMPONENT_KEYS.get(key)
+    if component_keys:
+        subtract_keys = (
+            {
+                "production_stockee",
+                "subventions_exploitation",
+                "reprises_exploitation",
+                "autres_produits_exploitation",
+            }
+            if key == "autres_elements"
+            else None
+        )
+        return _resolve_aggregated_comment(
+            direct_comment,
+            table_lookup,
+            component_keys,
+            subtract_keys=subtract_keys,
+        )
+
+    return direct_comment
 
 
 def _build_bilan_sheet(wb: Workbook, results: Dict, fields: List[Dict]):
@@ -850,10 +1088,6 @@ def _build_bilan_sheet(wb: Workbook, results: Dict, fields: List[Dict]):
             # Commentaires
             comment_cell = ws.cell(row=r, column=5)
             comment_cell.border = THIN_BORDER
-            if field_key:
-                comment_value = _get_bilan_comment(bilan_table_lookup, field_key)
-                if comment_value:
-                    comment_cell.value = comment_value
 
             if fill:
                 for c in range(2, 6):
@@ -874,6 +1108,10 @@ def _build_bilan_sheet(wb: Workbook, results: Dict, fields: List[Dict]):
             is_formula_n1=f"=SUM(D{actif_start_row}:D{actif_end_row})",
         )
         total_actif_row = row
+        row += 1
+
+        _write_data_row(row, "Total Actif (source doc)", "total_actif", font=ITALIC_FONT)
+        total_actif_source_row = row
         row += 1
 
         # --- PASSIF détail (Capital social, Résultat) en italique ---
@@ -898,20 +1136,28 @@ def _build_bilan_sheet(wb: Workbook, results: Dict, fields: List[Dict]):
         _write_data_row(row, "Dettes diverses", "dettes_diverses")
         row += 1
 
+        autres_passif_row = row
+        _write_data_row(row, "Autres éléments de passif", "autres_passif")
+        row += 1
+
         # Total Passif (formule)
         _write_data_row(
             row, "Total Passif", None,
             font=BOLD_FONT,
             is_formula_n=(
                 f"=C{capitaux_propres_row}+C{dettes_financieres_row}"
-                f"+C{dettes_exploitation_row}+C{dettes_diverses_row}"
+                f"+C{dettes_exploitation_row}+C{dettes_diverses_row}+C{autres_passif_row}"
             ),
             is_formula_n1=(
                 f"=D{capitaux_propres_row}+D{dettes_financieres_row}"
-                f"+D{dettes_exploitation_row}+D{dettes_diverses_row}"
+                f"+D{dettes_exploitation_row}+D{dettes_diverses_row}+D{autres_passif_row}"
             ),
         )
         total_passif_row = row
+        row += 1
+
+        _write_data_row(row, "Total Passif (source doc)", "total_passif", font=ITALIC_FONT)
+        total_passif_source_row = row
         row += 2
 
         # --- Checks ---
@@ -921,6 +1167,30 @@ def _build_bilan_sheet(wb: Workbook, results: Dict, fields: List[Dict]):
         for col, tr_actif, tr_passif in [(3, f"C{total_actif_row}", f"C{total_passif_row}"),
                                           (4, f"D{total_actif_row}", f"D{total_passif_row}")]:
             cell = ws.cell(row=row, column=col, value=f"={tr_actif}={tr_passif}")
+            cell.font = RED_FONT
+            cell.border = THIN_BORDER
+        row += 1
+
+        ws.cell(row=row, column=2, value="Check total actif source").font = RED_FONT
+        ws.cell(row=row, column=2).border = THIN_BORDER
+        for col, total_col in [(3, "C"), (4, "D")]:
+            cell = ws.cell(
+                row=row,
+                column=col,
+                value=f'=IF({total_col}{total_actif_source_row}="",TRUE,{total_col}{total_actif_row}={total_col}{total_actif_source_row})',
+            )
+            cell.font = RED_FONT
+            cell.border = THIN_BORDER
+        row += 1
+
+        ws.cell(row=row, column=2, value="Check total passif source").font = RED_FONT
+        ws.cell(row=row, column=2).border = THIN_BORDER
+        for col, total_col in [(3, "C"), (4, "D")]:
+            cell = ws.cell(
+                row=row,
+                column=col,
+                value=f'=IF({total_col}{total_passif_source_row}="",TRUE,{total_col}{total_passif_row}={total_col}{total_passif_source_row})',
+            )
             cell.font = RED_FONT
             cell.border = THIN_BORDER
         row += 1
@@ -945,28 +1215,16 @@ def _build_bilan_sheet(wb: Workbook, results: Dict, fields: List[Dict]):
         section_title.font = Font(bold=True, underline="single", size=11)
         row += 1
 
-        comptes_courants_n = _to_number(_get_bilan_value(results, suffix, bilan_table_lookup, "comptes_courants", "n")) or 0
-        comptes_courants_n1 = _to_number(_get_bilan_value(results, suffix, bilan_table_lookup, "comptes_courants", "n1")) or 0
         dettes_bancaires_n = _to_number(_get_bilan_value(results, suffix, bilan_table_lookup, "dettes_bancaires", "n")) or 0
         dettes_bancaires_n1 = _to_number(_get_bilan_value(results, suffix, bilan_table_lookup, "dettes_bancaires", "n1")) or 0
-
-        comptes_courants_row = row
-        _write_data_row(
-            row,
-            "Comptes courants d'associés",
-            None,
-            is_formula_n=_formula_literal_number(comptes_courants_n),
-            is_formula_n1=_formula_literal_number(comptes_courants_n1),
-        )
-        row += 1
 
         cp_cca_row = row
         _write_data_row(
             row,
-            "Capitaux propres au dernier arrêté + comptes courants",
+            "Capitaux propres au dernier arrêté",
             None,
-            is_formula_n=f"=C{capitaux_propres_row}+C{comptes_courants_row}",
-            is_formula_n1=f"=D{capitaux_propres_row}+D{comptes_courants_row}",
+            is_formula_n=f"=C{capitaux_propres_row}",
+            is_formula_n1=f"=D{capitaux_propres_row}",
         )
         row += 1
 
@@ -1154,10 +1412,6 @@ def _build_compte_resultat_sheet(wb: Workbook, results: Dict):
 
             comment_cell = ws.cell(row=r, column=5)
             comment_cell.border = THIN_BORDER
-            if field_key:
-                comment_value = _get_metric_comment(table_lookup, field_key)
-                if comment_value:
-                    comment_cell.value = comment_value
 
             if fill:
                 for c in range(2, 6):
@@ -1183,15 +1437,35 @@ def _build_compte_resultat_sheet(wb: Workbook, results: Dict):
         _write_row(row, "Dotations aux amortissements", "dotations")
         row += 1
 
+        autres_elements_row = row
+        _write_row(row, "Autres éléments", "autres_elements")
+        row += 1
+
         resultat_exploitation_row = row
         _write_row(
             row,
             "Résultat d'exploitation",
             None,
             font=BOLD_FONT,
-            is_formula_n=f"=C{chiffre_affaires_row}-SUM(C{charges_row}:C{dotations_row})",
-            is_formula_n1=f"=D{chiffre_affaires_row}-SUM(D{charges_row}:D{dotations_row})",
+            is_formula_n=f"=C{chiffre_affaires_row}-SUM(C{charges_row}:C{autres_elements_row})",
+            is_formula_n1=f"=D{chiffre_affaires_row}-SUM(D{charges_row}:D{autres_elements_row})",
         )
+        row += 1
+
+        _write_row(row, "Résultat d'exploitation (source doc)", "resultat_exploitation", font=ITALIC_FONT)
+        resultat_exploitation_source_row = row
+        row += 1
+
+        ws.cell(row=row, column=2, value="Check résultat d'exploitation source").font = RED_FONT
+        ws.cell(row=row, column=2).border = THIN_BORDER
+        for col, total_col in [(3, "C"), (4, "D")]:
+            cell = ws.cell(
+                row=row,
+                column=col,
+                value=f'=IF({total_col}{resultat_exploitation_source_row}="",TRUE,{total_col}{resultat_exploitation_row}={total_col}{resultat_exploitation_source_row})',
+            )
+            cell.font = RED_FONT
+            cell.border = THIN_BORDER
         row += 1
 
         _write_row(

@@ -41,7 +41,9 @@ logger = logging.getLogger(__name__)
 OUTPUT_DIR = ROOT_DIR / "output"
 
 # Budget texte envoyé au LLM par document (réduit le coût API)
-MAX_CHARS = 12_000          # ~3 000 tokens
+MAX_CHARS = int(os.environ.get("EXTRACT_MAX_CHARS", "12000"))
+FINANCIAL_MAX_CHARS = int(os.environ.get("EXTRACT_FINANCIAL_MAX_CHARS", "28000"))
+FINANCIAL_NEIGHBOR_PARENTS = int(os.environ.get("EXTRACT_FINANCIAL_NEIGHBOR_PARENTS", "1"))
 MIN_PARENT_CHARS = 50       # ignorer les parents trop courts
 
 # ---------------------------------------------------------------------------
@@ -240,8 +242,113 @@ def load_document_text(doc_path: Path) -> str:
     return "\n\n---\n\n".join(texts)
 
 
-def load_filtered_text(doc_path: Path, questions: List[Dict],
-                       max_chars: int = MAX_CHARS) -> str:
+def _is_financial_field(field: Dict) -> bool:
+    field_id = str(field.get("field_id", ""))
+    if field.get("excel_sheet") == "{company_name}":
+        return True
+    return field_id.startswith("bilan_")
+
+
+def _extra_keywords_for_field(field: Dict) -> List[str]:
+    field_id = str(field.get("field_id", ""))
+    if field_id == "bilan_actif_table":
+        return [
+            "bilan actif",
+            "actif",
+            "immobilisations",
+            "immobilisations corporelles",
+            "immobilisations financieres",
+            "creances",
+            "clients",
+            "autres creances",
+            "disponibilites",
+            "tresorerie",
+            "vmp",
+            "stocks",
+            "stock",
+            "en cours",
+            "marchandises",
+            "production en cours",
+            "charges constatees d avance",
+            "total actif",
+            "autres actif",
+        ]
+    if field_id == "bilan_passif_table":
+        return [
+            "bilan passif",
+            "passif",
+            "capitaux propres",
+            "capital social",
+            "resultat",
+            "dettes",
+            "dettes financieres",
+            "dettes exploitation",
+            "comptes courants",
+            "dettes bancaires",
+            "emprunts",
+            "fournisseurs",
+            "dettes fiscales",
+            "dettes sociales",
+            "autres dettes",
+            "provisions",
+            "provisions pour risques",
+            "provisions pour charges",
+            "produits constates d avance",
+            "total passif",
+            "autres passif",
+        ]
+    if field_id == "bilan_compte_resultat_table":
+        return [
+            "compte de resultat",
+            "resultat",
+            "produits",
+            "chiffre d affaires",
+            "charges",
+            "achats de marchandises",
+            "variation de stock",
+            "autres charges externes",
+            "salaires",
+            "charges sociales",
+            "impots",
+            "taxes",
+            "dotations",
+            "dotations aux amortissements",
+            "dotations aux provisions",
+            "production stockee",
+            "subventions d exploitation",
+            "reprises sur amortissements",
+            "autres charges",
+            "autres produits",
+            "produits d exploitation",
+            "charges d exploitation",
+            "subventions",
+            "resultat financier",
+            "resultat exceptionnel",
+        ]
+    if field_id == "bilan_societe_nom":
+        return ["designation de l entreprise", "denomination", "societe", "raison sociale"]
+    if field_id.startswith("bilan_date_arrete"):
+        return [
+            "date de cloture",
+            "exercice n clos le",
+            "exercice n 1 clos le",
+            "date arrete",
+            "31 12",
+        ]
+    return []
+
+
+def _needs_broad_financial_context(questions: List[Dict]) -> bool:
+    return any(_is_financial_field(question) for question in questions)
+
+
+def load_filtered_text(
+    doc_path: Path,
+    questions: List[Dict],
+    max_chars: int = MAX_CHARS,
+    preserve_order: bool = False,
+    neighbor_parents: int = 0,
+) -> str:
     """Charge un JSONL et ne garde que les parents pertinents pour les questions,
     dans la limite de *max_chars* caractères.
 
@@ -258,7 +365,17 @@ def load_filtered_text(doc_path: Path, questions: List[Dict],
     keywords: set[str] = set()
     for q in questions:
         for kw in q.get("hint_keywords", []):
-            keywords.add(kw.lower())
+            canon_kw = canonical_name(kw)
+            if canon_kw:
+                keywords.add(canon_kw)
+        for kw in q.get("source_doc_name_variants", []):
+            canon_kw = canonical_name(kw)
+            if canon_kw:
+                keywords.add(canon_kw)
+        for kw in _extra_keywords_for_field(q):
+            canon_kw = canonical_name(kw)
+            if canon_kw:
+                keywords.add(canon_kw)
 
     # Charger tous les parents
     parents: list[dict] = []
@@ -267,30 +384,65 @@ def load_filtered_text(doc_path: Path, questions: List[Dict],
             parents.append(json.loads(line))
 
     # 2-3. Scorer et filtrer
-    scored: list[tuple[int, dict]] = []
-    for p in parents:
+    scored: list[tuple[int, int, dict]] = []
+    for idx, p in enumerate(parents):
         text = p.get("text", "")
         if len(text) < MIN_PARENT_CHARS:
             continue
-        haystack = f"{p.get('section_title', '')} {p.get('source_path', '')} {text}".lower()
+        haystack = canonical_name(
+            f"{p.get('section_title', '')} {p.get('source_path', '')} {text}"
+        )
         hits = sum(1 for kw in keywords if kw in haystack)
         if hits > 0:
-            scored.append((hits, p))
+            scored.append((hits, idx, p))
 
     # 4. Trier par pertinence, construire le texte dans le budget
     scored.sort(key=lambda x: x[0], reverse=True)
 
     texts: list[str] = []
     total = 0
-    for _, p in scored:
-        block = _format_parent(p)
-        if total + len(block) > max_chars:
-            remaining = max_chars - total
-            if remaining > 200:
-                texts.append(block[:remaining] + "\n[…]")
-            break
-        texts.append(block)
-        total += len(block)
+    if preserve_order and scored:
+        selected_indices: set[int] = set()
+        indexed_parents = {idx: p for _, idx, p in scored}
+        for _, idx, _ in scored:
+            for candidate_idx in range(
+                max(0, idx - neighbor_parents),
+                min(len(parents), idx + neighbor_parents + 1),
+            ):
+                parent = parents[candidate_idx]
+                if len(parent.get("text", "")) < MIN_PARENT_CHARS:
+                    continue
+                selected_indices.add(candidate_idx)
+
+        for idx in sorted(selected_indices):
+            block = _format_parent(indexed_parents.get(idx, parents[idx]))
+            if total + len(block) > max_chars:
+                remaining = max_chars - total
+                if remaining > 200:
+                    texts.append(block[:remaining] + "\n[…]")
+                break
+            texts.append(block)
+            total += len(block)
+
+        if total < max_chars:
+            for idx, parent in enumerate(parents):
+                if idx in selected_indices or len(parent.get("text", "")) < MIN_PARENT_CHARS:
+                    continue
+                block = _format_parent(parent)
+                if total + len(block) > max_chars:
+                    break
+                texts.append(block)
+                total += len(block)
+    else:
+        for _, _, p in scored:
+            block = _format_parent(p)
+            if total + len(block) > max_chars:
+                remaining = max_chars - total
+                if remaining > 200:
+                    texts.append(block[:remaining] + "\n[…]")
+                break
+            texts.append(block)
+            total += len(block)
 
     # 5. Fallback : aucun match → premiers parents jusqu'au budget
     if not texts:
@@ -334,6 +486,40 @@ def build_prompt(document_text: str, questions: List[Dict], filename: str, sourc
     fields_block = "\n".join(fields_desc)
     field_ids = [q["field_id"] for q in questions]
 
+    extra_instructions = ""
+    if _needs_broad_financial_context(questions):
+        extra_instructions = """
+## ATTENTION — Etats financiers
+
+### Formats multiples
+- Les bilans, liasses et comptes annuels n'ont PAS tous le même template. N'exige pas un format 2033-A/2033-B exact.
+- Si le document contient un bilan, un passif, un actif ou un compte de résultat équivalent, mappe les libellés comptables les plus proches vers les champs demandés.
+- Avant de retourner null sur un poste comptable, vérifie l'ensemble de la section pertinente et pas seulement une ligne ou un sous-tableau.
+- Pour les champs de type tableau, retourne TOUS les objets demandés, même si certaines valeurs sont null.
+- N'invente pas de correspondance forcée, mais sois plus large sur les libellés proches que sur un template spécifique.
+
+### REGLE CRITIQUE — Identification des colonnes N et N-1
+AVANT d'extraire toute valeur, identifie la structure du tableau :
+1. Repère les en-têtes de colonnes : "Net au 31/12/2023", "Au 31/12/2024", "Du 01/01/2024 au 31/12/2024", etc.
+2. **N = l'exercice LE PLUS RÉCENT** (la date de clôture la plus récente). N-1 = l'exercice précédent.
+3. Si le tableau a 4+ colonnes (Brut, Amortissements/Dépréciations, Net N, Net N-1), utilise TOUJOURS les colonnes **Net** (jamais Brut).
+4. Si une seule période est présentée (premier exercice), c'est N. Retourne null pour N-1.
+5. ATTENTION : ne confonds PAS la colonne "Brut" avec "Net N" ni la colonne "Net N-1" avec "Net N".
+
+### REGLE CRITIQUE — Totaux de catégorie vs sous-lignes
+Pour chaque poste demandé (ex: immobilisations_corporelles) :
+1. S'il existe un **sous-total** ou **total de section** affiché (ex: "ACTIF IMMOBILISÉ", "Total immobilisations corporelles"), utilise-le.
+2. Sinon, **somme toutes les sous-lignes nettes** de la section (ex: Terrains net + Constructions net + Installations net + Autres immo corporelles net).
+3. Ne prends JAMAIS une seule sous-ligne quand il y en a plusieurs dans la catégorie.
+4. Indique dans commentaires si tu as sommé des sous-lignes (formule).
+
+### REGLE CRITIQUE — Vérification croisée
+Après extraction, vérifie que :
+- La somme de tes lignes d'actif est cohérente avec le TOTAL ACTIF affiché dans le document.
+- La somme de tes lignes de passif est cohérente avec le TOTAL PASSIF affiché.
+- Si l'écart est > 5%, tu as probablement une erreur de colonne ou de double comptage. Relis le tableau.
+"""
+
     return f"""Tu es un analyste financier expert. Tu extrais des informations précises depuis des documents de projet immobilier (crowdfunding obligataire).
 
 ## Document : {filename}
@@ -349,6 +535,7 @@ Extrais les informations suivantes de ce document. Pour chaque champ :
 - Ne devine PAS. Ne fabrique PAS de données. Si tu n'es pas sûr, retourne null.
 - Respecte le format demandé.
 - Si un champ contient une contrainte "SourceDoc attendu" (ou variantes), vérifie intelligemment que le nom du document actuel correspond bien (tolérance: accents, tirets, underscores, fautes mineures, mots manquants comme "complétée"). Si la correspondance n'est pas solide, retourne null pour ce champ.
+{extra_instructions}
 
 ## ATTENTION — Distinction importante
 
@@ -383,6 +570,24 @@ def _is_per_company_field(field: Dict) -> bool:
 
 
 _YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2}|21\d{2})\b")
+_POSTAL_CODE_RE = re.compile(r"\b\d{5}\b")
+_PROJECT_LOCATION_FIELD_ID = "localisation_projet"
+_ADDRESS_STREET_HINTS = {
+    "rue",
+    "avenue",
+    "av",
+    "boulevard",
+    "bd",
+    "chemin",
+    "allee",
+    "all",
+    "impasse",
+    "route",
+    "cours",
+    "place",
+    "quai",
+    "faubourg",
+}
 
 
 def _extract_years_from_text(text: str) -> List[int]:
@@ -425,6 +630,103 @@ def _select_latest_financial_years(
         return set()
 
     return set(sorted(years, reverse=True)[:limit])
+
+
+def _extract_company_folder_from_source_path(source_path: str) -> Optional[str]:
+    """Retourne le dossier parent immédiat du fichier (= dossier société)."""
+    parts = [p for p in source_path.replace("\\", "/").split("/") if p]
+    # Dernier élément = fichier, avant-dernier = dossier parent
+    if len(parts) >= 2:
+        return parts[-2]
+    return None
+
+
+def _build_latest_year_per_company_folder(
+    manifest_files: List[Dict],
+    company_fields: List[Dict],
+    selected_audit_folder: Optional[str] = None,
+) -> Dict[str, int]:
+    """Retourne {normalized_folder → année_max} pour les docs financiers.
+
+    Permet de ne traiter que le bilan le plus récent par société,
+    même si plusieurs bilans (2022, 2023…) sont présents dans le même dossier.
+    """
+    folder_years: Dict[str, int] = {}
+    for doc_info in manifest_files:
+        matched_company = match_questions_to_doc(doc_info, company_fields, selected_audit_folder)
+        if not matched_company:
+            continue
+        year = _get_doc_financial_year(doc_info)
+        if year is None:
+            continue
+        folder = _extract_company_folder_from_source_path(doc_info.get("source_path", ""))
+        if not folder:
+            folder = Path(doc_info.get("filename", "unknown")).stem
+        folder_key = canonical_name(folder)
+        if folder_key not in folder_years or year > folder_years[folder_key]:
+            folder_years[folder_key] = year
+    return folder_years
+
+
+def _looks_like_precise_project_address(value: Optional[str]) -> bool:
+    text = (value or "").strip()
+    if not text:
+        return False
+
+    normalized = canonical_name(text)
+    if not normalized:
+        return False
+
+    tokens = set(normalized.split())
+    has_street_hint = any(token in tokens for token in _ADDRESS_STREET_HINTS)
+    has_number = re.search(r"\b\d+[a-zA-Z]?\b", text) is not None
+    has_postal_code = _POSTAL_CODE_RE.search(text) is not None
+    return has_street_hint and (has_number or has_postal_code)
+
+
+def _same_project_address(candidate_a: str, candidate_b: str) -> bool:
+    norm_a = canonical_name(candidate_a)
+    norm_b = canonical_name(candidate_b)
+    if not norm_a or not norm_b:
+        return False
+    return norm_a == norm_b or norm_a in norm_b or norm_b in norm_a
+
+
+def _resolve_project_location(candidates: List[Dict]) -> Optional[str]:
+    precise_candidates = [
+        candidate for candidate in candidates
+        if _looks_like_precise_project_address(candidate.get("value"))
+    ]
+    if len(precise_candidates) < 2:
+        return None
+
+    best_cluster: List[Dict] = []
+    best_doc_count = 0
+    best_value_len = 0
+
+    for candidate in precise_candidates:
+        cluster = [
+            other for other in precise_candidates
+            if _same_project_address(candidate.get("value", ""), other.get("value", ""))
+        ]
+        unique_docs = {item.get("document_id") for item in cluster if item.get("document_id")}
+        doc_count = len(unique_docs)
+        if doc_count < 2:
+            continue
+        value_len = max((len(item.get("value", "")) for item in cluster), default=0)
+        if doc_count > best_doc_count or (doc_count == best_doc_count and value_len > best_value_len):
+            best_cluster = cluster
+            best_doc_count = doc_count
+            best_value_len = value_len
+
+    if not best_cluster:
+        return None
+
+    return max(
+        (item.get("value", "").strip() for item in best_cluster),
+        key=len,
+        default=None,
+    ) or None
 
 
 def _call_llm_with_retry(call_llm, prompt: str, max_retries: int = 3) -> Optional[str]:
@@ -530,17 +832,20 @@ def run(project_id: str):
     company_name_map: Dict[str, int] = {}
     company_name_display: Dict[str, str] = {}
     company_counter = 0
+    project_location_candidates: List[Dict] = []
     extraction_log = []
-    latest_financial_years = _select_latest_financial_years(
+    latest_year_per_company = _build_latest_year_per_company_folder(
         manifest["files"],
         company_fields,
         selected_audit_folder,
-        limit=2,
     )
-    if latest_financial_years:
+    if latest_year_per_company:
         logger.info(
-            "  📆 Années financières retenues : %s",
-            ", ".join(str(year) for year in sorted(latest_financial_years, reverse=True)),
+            "  📆 Bilan le plus récent par société : %s",
+            ", ".join(
+                f"{folder}={year}"
+                for folder, year in sorted(latest_year_per_company.items())
+            ),
         )
 
     logger.info(f"Extraction structurée : {len(manifest['files'])} documents, "
@@ -565,13 +870,19 @@ def run(project_id: str):
         matched_person = match_questions_to_doc(doc_info, person_fields, selected_audit_folder)
         # --- Champs per-company (bilan) : groupés par société extraite du document ---
         matched_company = match_questions_to_doc(doc_info, company_fields, selected_audit_folder)
-        if matched_company and latest_financial_years:
+        if matched_company and latest_year_per_company:
             doc_year = _get_doc_financial_year(doc_info)
-            if doc_year is not None and doc_year not in latest_financial_years:
-                logger.info(
-                    f"  ⏭️  Doc financier ignoré (année {doc_year} hors 2 dernières) : {filename}"
-                )
-                matched_company = []
+            if doc_year is not None:
+                folder = _extract_company_folder_from_source_path(source_path)
+                folder_key = canonical_name(folder) if folder else None
+                if folder_key and folder_key in latest_year_per_company:
+                    max_year = latest_year_per_company[folder_key]
+                    if doc_year < max_year:
+                        logger.info(
+                            f"  ⏭️  Doc financier ignoré (année {doc_year} < {max_year}"
+                            f" pour '{folder}') : {filename}"
+                        )
+                        matched_company = []
 
         person_folder = None
         if matched_person:
@@ -601,13 +912,23 @@ def run(project_id: str):
         questions_to_ask = unanswered_global + matched_person + matched_company
 
         # Charger le texte (filtré par pertinence + budget)
-        doc_text = load_filtered_text(doc_path, questions_to_ask)
+        broad_financial_context = _needs_broad_financial_context(questions_to_ask)
+        doc_text = load_filtered_text(
+            doc_path,
+            questions_to_ask,
+            max_chars=FINANCIAL_MAX_CHARS if broad_financial_context else MAX_CHARS,
+            preserve_order=broad_financial_context,
+            neighbor_parents=FINANCIAL_NEIGHBOR_PARENTS if broad_financial_context else 0,
+        )
         token_est = doc_info.get("token_estimate", 0)
         chars_sent = len(doc_text)
 
-        logger.info(f"  📄 {filename} ({token_est} tok orig → {chars_sent} chars envoyés) "
-                     f"→ {len(unanswered_global)} globales + {len(matched_person)} per-person + "
-                     f"{len(matched_company)} per-company")
+        logger.info(
+            f"  📄 {filename} ({token_est} tok orig → {chars_sent} chars envoyés"
+            f"{' en mode financier élargi' if broad_financial_context else ''}) "
+            f"→ {len(unanswered_global)} globales + {len(matched_person)} per-person + "
+            f"{len(matched_company)} per-company"
+        )
 
         # Appel LLM
         prompt = build_prompt(doc_text, questions_to_ask, filename, source_path)
@@ -644,6 +965,14 @@ def run(project_id: str):
         # --- Merger les champs globaux (première valeur non-null gagne) ---
         found = 0
         for field_id, value in answers.items():
+            if field_id == _PROJECT_LOCATION_FIELD_ID and value is not None:
+                project_location_candidates.append({
+                    "document_id": document_id,
+                    "filename": filename,
+                    "source_path": source_path,
+                    "value": _stringify_non_table_value(value),
+                })
+                continue
             if field_id in results and value is not None and results[field_id] is None:
                 results[field_id] = _stringify_non_table_value(value)
                 found += 1
@@ -712,6 +1041,18 @@ def run(project_id: str):
 
         # Rate limiting
         time.sleep(2)
+
+    resolved_project_location = _resolve_project_location(project_location_candidates)
+    if resolved_project_location:
+        results[_PROJECT_LOCATION_FIELD_ID] = resolved_project_location
+        logger.info(
+            "  📍 Localisation projet corroborée sur 2+ documents : %s",
+            resolved_project_location,
+        )
+    elif project_location_candidates:
+        logger.warning(
+            "  ⚠️ Localisation projet ignorée : aucune adresse précise corroborée sur 2 documents"
+        )
 
     # --- Résumé ---
     answered_global = sum(1 for field_id in global_field_ids if results.get(field_id) is not None)
