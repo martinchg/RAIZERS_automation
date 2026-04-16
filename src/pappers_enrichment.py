@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import unicodedata
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -8,6 +9,26 @@ import requests
 
 
 PAPPERS_BASE_URL = os.environ.get("PAPPERS_BASE_URL", "https://api.pappers.fr/v2").rstrip("/")
+DIFFICULTE_PUBLICATION_KEYWORDS = [
+    "liquidation judiciaire",
+    "redressement judiciaire",
+    "procédure de sauvegarde",
+    "cessation des paiements",
+    "clôture pour insuffisance d'actif",
+    "jugement d'ouverture",
+    "conversion en liquidation judiciaire",
+    "plan de redressement",
+    "plan de sauvegarde",
+    "administrateur judiciaire",
+    "mandataire judiciaire",
+    "liquidateur",
+    "dissolution anticipée",
+    "radiation",
+    "cessation d'activité",
+    "privilège URSSAF",
+    "privilège du Trésor",
+    "défaut de dépôt des comptes",
+]
 
 
 class PappersError(Exception):
@@ -40,6 +61,19 @@ def _clean_text(value: str) -> str:
     return re.sub(r"\s+", " ", (value or "").strip())
 
 
+def _normalize_publication_match_text(value: str) -> str:
+    value = unicodedata.normalize("NFKD", value or "")
+    value = "".join(ch for ch in value if unicodedata.category(ch) != "Mn")
+    value = re.sub(r"[^a-z0-9]+", " ", value.lower())
+    return _clean_text(value)
+
+
+NORMALIZED_DIFFICULTE_PUBLICATION_KEYWORDS = [
+    (keyword, _normalize_publication_match_text(keyword))
+    for keyword in DIFFICULTE_PUBLICATION_KEYWORDS
+]
+
+
 def _first_prenom(value: str) -> str:
     cleaned = _clean_text(value)
     if not cleaned:
@@ -64,6 +98,155 @@ def _extract_company_name(item: dict) -> Optional[str]:
         or item.get("entreprise")
         or item.get("societe")
     )
+
+
+def _extract_company_publications(company_detail: Optional[dict]) -> List[dict]:
+    if not isinstance(company_detail, dict):
+        return []
+
+    for raw_publications in (
+        company_detail.get("publications"),
+        company_detail.get("publication"),
+        company_detail.get("publications_bodacc"),
+    ):
+        if isinstance(raw_publications, list):
+            return [item for item in raw_publications if isinstance(item, dict)]
+        if isinstance(raw_publications, dict):
+            for key in ["resultats", "results", "items", "publications"]:
+                items = raw_publications.get(key)
+                if isinstance(items, list):
+                    return [item for item in items if isinstance(item, dict)]
+
+    return []
+
+
+def _extract_publication_keyword_matches(text: str) -> List[Tuple[int, str]]:
+    normalized_text = _normalize_publication_match_text(text)
+    if not normalized_text:
+        return []
+
+    return [
+        (index, keyword)
+        for index, (keyword, normalized_keyword) in enumerate(NORMALIZED_DIFFICULTE_PUBLICATION_KEYWORDS)
+        if normalized_keyword and normalized_keyword in normalized_text
+    ]
+
+
+def _split_publication_sentences(contenu: str) -> List[str]:
+    raw = str(contenu or "").strip()
+    if not raw:
+        return []
+
+    raw = re.sub(r"[ \t\r\f\v]+", " ", raw)
+    raw = re.sub(r"\s*\n+\s*", "\n", raw)
+    sentences = [
+        _clean_text(part)
+        for part in re.split(r"(?<=[.!?;])\s+|\n+", raw)
+        if _clean_text(part)
+    ]
+    return sentences or [_clean_text(raw)]
+
+
+def _score_publication_sentence(sentence: str) -> Optional[Tuple]:
+    matched_keywords = _extract_publication_keyword_matches(sentence)
+    if not matched_keywords:
+        return None
+
+    sentence = _clean_text(sentence)
+    alpha_chars = [char for char in sentence if char.isalpha()]
+    uppercase_ratio = (
+        sum(1 for char in alpha_chars if char.isupper()) / len(alpha_chars)
+        if alpha_chars else 0
+    )
+    sentence_length = len(sentence)
+    length_penalty = abs(sentence_length - 160)
+    if sentence_length < 40:
+        length_penalty += 60
+    if sentence_length > 320:
+        length_penalty += sentence_length - 320
+
+    lower_sentence = sentence.lower()
+    return (
+        len(matched_keywords),
+        -min(index for index, _ in matched_keywords),
+        1 if sentence.endswith((".", "!", "?")) else 0,
+        -length_penalty,
+        -int("http://" in lower_sentence or "https://" in lower_sentence or "www." in lower_sentence),
+        -int(uppercase_ratio > 0.55),
+        -sentence_length,
+    )
+
+
+def _extract_company_difficulte_signal(company_detail: Optional[dict]) -> Tuple[Optional[str], dict]:
+    publications = _extract_company_publications(company_detail)
+    candidates = []
+
+    for publication_index, publication in enumerate(publications):
+        contenu = publication.get("contenu")
+        if not isinstance(contenu, str):
+            continue
+
+        cleaned_contenu = _clean_text(contenu)
+        if not cleaned_contenu:
+            continue
+
+        contenu_matches = _extract_publication_keyword_matches(cleaned_contenu)
+        if not contenu_matches:
+            continue
+
+        best_sentence = None
+        best_score = None
+        best_sentence_index = 0
+        best_sentence_keywords: List[str] = []
+
+        for sentence_index, sentence in enumerate(_split_publication_sentences(contenu)):
+            score = _score_publication_sentence(sentence)
+            if score is None:
+                continue
+
+            sentence_keywords = [keyword for _, keyword in _extract_publication_keyword_matches(sentence)]
+            candidate = (score, -sentence_index)
+            if best_sentence is None or candidate > (best_score, -best_sentence_index):
+                best_sentence = _clean_text(sentence)
+                best_score = score
+                best_sentence_keywords = list(dict.fromkeys(sentence_keywords))
+                best_sentence_index = sentence_index
+
+        if best_sentence is None:
+            best_sentence = cleaned_contenu
+            best_score = _score_publication_sentence(cleaned_contenu)
+            best_sentence_keywords = list(dict.fromkeys(keyword for _, keyword in contenu_matches))
+            best_sentence_index = 0
+
+        if best_score is None:
+            continue
+
+        candidates.append({
+            "publication_index": publication_index,
+            "sentence_index": best_sentence_index,
+            "score": best_score,
+            "selected_contenu": best_sentence,
+            "selected_keywords": best_sentence_keywords,
+        })
+
+    if not candidates:
+        return None, {
+            "publication_count": len(publications),
+            "matched_publication_count": 0,
+            "selected_contenu": None,
+            "selected_keywords": [],
+        }
+
+    best_candidate = max(
+        candidates,
+        key=lambda item: (item["score"], -item["publication_index"], -item["sentence_index"]),
+    )
+    return best_candidate["selected_contenu"], {
+        "publication_count": len(publications),
+        "matched_publication_count": len(candidates),
+        "selected_contenu": best_candidate["selected_contenu"],
+        "selected_keywords": best_candidate["selected_keywords"],
+    }
 
 
 def _dedupe_company_rows(rows: List[dict]) -> List[dict]:
@@ -94,6 +277,7 @@ def _dedupe_company_rows(rows: List[dict]) -> List[dict]:
             "role": row.get("role"),
             "detention": row.get("detention"),
             "commentaires": row.get("commentaires"),
+            "publication_difficulte_contenu": row.get("publication_difficulte_contenu"),
         }
 
         if dedupe_key not in merged_rows:
@@ -225,9 +409,11 @@ def _run_recherche_by_siren(siren: str) -> Tuple[Optional[dict], dict]:
         (item for item in items if _clean_text(str(item.get("siren") or "")) == siren),
         items[0] if items else None,
     )
+    _, publication_signal = _extract_company_difficulte_signal(exact_item)
     return exact_item, {
         "query_params": params,
         "result_count": len(items),
+        "publication_signal": publication_signal,
     }
 
 
@@ -338,7 +524,12 @@ def _extract_role_from_company_stub(company_stub: dict, dirigeant_item: dict) ->
     ) or None
 
 
-def _build_company_row_from_sources(company_stub: dict, company_detail: Optional[dict], dirigeant_item: dict) -> dict:
+def _build_company_row_from_sources(
+    company_stub: dict,
+    company_detail: Optional[dict],
+    dirigeant_item: dict,
+    publication_difficulte_contenu: Optional[str] = None,
+) -> dict:
     base = company_detail or {}
     company_name = _clean_text(
         base.get("nom_entreprise")
@@ -368,6 +559,7 @@ def _build_company_row_from_sources(company_stub: dict, company_detail: Optional
         "role": _extract_role_from_company_stub(company_stub, dirigeant_item),
         "detention": None,
         "commentaires": None,
+        "publication_difficulte_contenu": publication_difficulte_contenu,
     }
 
 
@@ -422,9 +614,17 @@ def _search_companies_for_person(
         for company_stub in dirigeant_item.get("entreprises") or []:
             siren = _clean_text(str(company_stub.get("siren") or ""))
             company_detail = None
+            siren_meta = None
             if len(siren) == 9:
                 if recherche_cache is not None and siren in recherche_cache:
                     company_detail = recherche_cache[siren]
+                    _, publication_signal = _extract_company_difficulte_signal(company_detail)
+                    siren_meta = {
+                        "query_params": {"siren": siren},
+                        "result_count": 1 if company_detail else 0,
+                        "cache_hit": True,
+                        "publication_signal": publication_signal,
+                    }
                 else:
                     try:
                         company_detail, siren_meta = _run_recherche_by_siren(siren)
@@ -434,10 +634,21 @@ def _search_companies_for_person(
                         print(f"[WARN] /recherche error for siren={siren}: {exc}")
                     if recherche_cache is not None:
                         recherche_cache[siren] = company_detail
-                    recherche_by_siren_meta[siren] = siren_meta
+                recherche_by_siren_meta[siren] = siren_meta
+
+            publication_difficulte_contenu = None
+            if siren_meta:
+                publication_difficulte_contenu = (
+                    (siren_meta.get("publication_signal") or {}).get("selected_contenu")
+                )
 
             company_rows.append(
-                _build_company_row_from_sources(company_stub, company_detail, dirigeant_item)
+                _build_company_row_from_sources(
+                    company_stub,
+                    company_detail,
+                    dirigeant_item,
+                    publication_difficulte_contenu=publication_difficulte_contenu,
+                )
             )
 
     debug_payload = {

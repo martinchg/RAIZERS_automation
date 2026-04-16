@@ -175,6 +175,25 @@ def _format_display_value(value):
     return text
 
 
+def _merge_commentaires(*values) -> Optional[str]:
+    merged: List[str] = []
+    seen = set()
+
+    for value in values:
+        text = re.sub(r"\s+", " ", str(value or "").strip())
+        if not text:
+            continue
+
+        dedupe_key = text.lower()
+        if dedupe_key in seen:
+            continue
+
+        seen.add(dedupe_key)
+        merged.append(text)
+
+    return "\n".join(merged) or None
+
+
 def _apply_numeric_format(cell, value=None):
     target = cell.value if value is None else value
     number = _to_number(target)
@@ -1584,6 +1603,10 @@ def _build_mandats_sheet(wb: Workbook, pappers_mandats: Dict):
             else:
                 cell.font = VALUE_FONT
 
+            commentaires_value = _merge_commentaires(
+                company.get("commentaires"),
+                company.get("publication_difficulte_contenu"),
+            )
             values = [
                 role_value,
                 company.get("activite"),
@@ -1593,13 +1616,15 @@ def _build_mandats_sheet(wb: Workbook, pappers_mandats: Dict):
                 _build_statut(company),
                 company.get("nb_dirigeants_total"),
                 company.get("detention"),
-                company.get("commentaires"),
+                commentaires_value,
             ]
             for col_idx, val in enumerate(values):
                 display_val = _format_display_value(val) if not isinstance(val, (int, float)) else val
                 c = ws.cell(row=row, column=3 + col_idx, value=display_val)
                 c.font = VALUE_FONT
                 c.border = THIN_BORDER
+                if col_idx == len(values) - 1:
+                    c.alignment = Alignment(vertical="top", wrap_text=True)
                 if row_fill:
                     c.fill = row_fill
                 _apply_numeric_format(c, val)

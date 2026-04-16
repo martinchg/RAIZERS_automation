@@ -35,7 +35,7 @@ Les patterns sont comparés de façon souple sur le nom de fichier et le `source
 ### 2. Extract — Extraction structurée via LLM
 
 ```bash
-python run.py extract --project raizers-en-audit-nom-du-projet
+python run.py extract --project raizers-en-audit-signature
 ```
 
 Envoie les documents au LLM pour extraire les champs métier. Résultat dans `extraction_results.json`.
@@ -43,7 +43,7 @@ Envoie les documents au LLM pour extraire les champs métier. Résultat dans `ex
 ### 3. Mandats — Enrichissement Pappers
 
 ```bash
-python run.py mandats --project raizers-en-audit-nom-du-projet
+python run.py mandats --project raizers-en-audit-signature
 ```
 
 Extrait les personnes depuis les casiers judiciaires, identifie la bonne personne via Pappers (`/recherche-dirigeants`) en s'appuyant sur le nom/prénom et la date de naissance quand elle est disponible, puis enrichit chaque société via `/recherche` avec le `SIREN`. Le rôle du dirigeant provient de `/recherche-dirigeants`. Résultat dans `mandats_results.json`.

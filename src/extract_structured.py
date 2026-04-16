@@ -44,6 +44,9 @@ OUTPUT_DIR = ROOT_DIR / "output"
 MAX_CHARS = int(os.environ.get("EXTRACT_MAX_CHARS", "12000"))
 FINANCIAL_MAX_CHARS = int(os.environ.get("EXTRACT_FINANCIAL_MAX_CHARS", "28000"))
 FINANCIAL_NEIGHBOR_PARENTS = int(os.environ.get("EXTRACT_FINANCIAL_NEIGHBOR_PARENTS", "1"))
+FINANCIAL_MAX_RELATIVE_PAGE_WINDOW = int(
+    os.environ.get("EXTRACT_FINANCIAL_MAX_RELATIVE_PAGE_WINDOW", "10")
+)
 MIN_PARENT_CHARS = 50       # ignorer les parents trop courts
 
 # ---------------------------------------------------------------------------
@@ -187,6 +190,18 @@ def _format_parent(parent: dict) -> str:
     if title and not text.startswith(f"## {title}"):
         return f"## {title}\n{text}"
     return text
+
+
+def _coerce_page_number(value) -> Optional[int]:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if cleaned.isdigit():
+            return int(cleaned)
+    return None
 
 
 def _is_old_source_path(source_path: str) -> bool:
@@ -348,6 +363,8 @@ def load_filtered_text(
     max_chars: int = MAX_CHARS,
     preserve_order: bool = False,
     neighbor_parents: int = 0,
+    append_unmatched_tail: bool = True,
+    max_relative_page_window: Optional[int] = None,
 ) -> str:
     """Charge un JSONL et ne garde que les parents pertinents pour les questions,
     dans la limite de *max_chars* caractères.
@@ -414,6 +431,23 @@ def load_filtered_text(
                     continue
                 selected_indices.add(candidate_idx)
 
+        if max_relative_page_window is not None and selected_indices:
+            matched_pages = [
+                _coerce_page_number(parents[idx].get("page_start"))
+                for idx in selected_indices
+            ]
+            matched_pages = [page for page in matched_pages if page is not None]
+            if matched_pages:
+                max_allowed_page = min(matched_pages) + max_relative_page_window
+                selected_indices = {
+                    idx
+                    for idx in selected_indices
+                    if (
+                        _coerce_page_number(parents[idx].get("page_start")) is None
+                        or _coerce_page_number(parents[idx].get("page_start")) <= max_allowed_page
+                    )
+                }
+
         for idx in sorted(selected_indices):
             block = _format_parent(indexed_parents.get(idx, parents[idx]))
             if total + len(block) > max_chars:
@@ -424,7 +458,7 @@ def load_filtered_text(
             texts.append(block)
             total += len(block)
 
-        if total < max_chars:
+        if append_unmatched_tail and total < max_chars:
             for idx, parent in enumerate(parents):
                 if idx in selected_indices or len(parent.get("text", "")) < MIN_PARENT_CHARS:
                     continue
@@ -491,33 +525,33 @@ def build_prompt(document_text: str, questions: List[Dict], filename: str, sourc
         extra_instructions = """
 ## ATTENTION — Etats financiers
 
-### Formats multiples
-- Les bilans, liasses et comptes annuels n'ont PAS tous le même template. N'exige pas un format 2033-A/2033-B exact.
-- Si le document contient un bilan, un passif, un actif ou un compte de résultat équivalent, mappe les libellés comptables les plus proches vers les champs demandés.
-- Avant de retourner null sur un poste comptable, vérifie l'ensemble de la section pertinente et pas seulement une ligne ou un sous-tableau.
-- Pour les champs de type tableau, retourne TOUS les objets demandés, même si certaines valeurs sont null.
-- N'invente pas de correspondance forcée, mais sois plus large sur les libellés proches que sur un template spécifique.
+### Colonnes N et N-1
+- N = exercice le PLUS RÉCENT. N-1 = exercice précédent.
+- Si 4+ colonnes (Brut, Amort, Net N, Net N-1) : utilise TOUJOURS Net.
+- Si un seul exercice : N-1 = null.
 
-### REGLE CRITIQUE — Identification des colonnes N et N-1
-AVANT d'extraire toute valeur, identifie la structure du tableau :
-1. Repère les en-têtes de colonnes : "Net au 31/12/2023", "Au 31/12/2024", "Du 01/01/2024 au 31/12/2024", etc.
-2. **N = l'exercice LE PLUS RÉCENT** (la date de clôture la plus récente). N-1 = l'exercice précédent.
-3. Si le tableau a 4+ colonnes (Brut, Amortissements/Dépréciations, Net N, Net N-1), utilise TOUJOURS les colonnes **Net** (jamais Brut).
-4. Si une seule période est présentée (premier exercice), c'est N. Retourne null pour N-1.
-5. ATTENTION : ne confonds PAS la colonne "Brut" avec "Net N" ni la colonne "Net N-1" avec "Net N".
+### Totaux vs sous-lignes
+- S'il existe un sous-total affiché, utilise-le.
+- Sinon, somme les sous-lignes nettes. Indique la formule en commentaires.
+- Ne prends JAMAIS une seule sous-ligne quand il y en a plusieurs.
 
-### REGLE CRITIQUE — Totaux de catégorie vs sous-lignes
-Pour chaque poste demandé (ex: immobilisations_corporelles) :
-1. S'il existe un **sous-total** ou **total de section** affiché (ex: "ACTIF IMMOBILISÉ", "Total immobilisations corporelles"), utilise-le.
-2. Sinon, **somme toutes les sous-lignes nettes** de la section (ex: Terrains net + Constructions net + Installations net + Autres immo corporelles net).
-3. Ne prends JAMAIS une seule sous-ligne quand il y en a plusieurs dans la catégorie.
-4. Indique dans commentaires si tu as sommé des sous-lignes (formule).
+### INTERDIT — Double comptage
+Chaque montant du document ne peut apparaître que dans UN SEUL poste de ta réponse.
+Exemple d'erreur fréquente : mettre 501 dans immobilisations_financieres ET dans autres_actif_residuel.
 
-### REGLE CRITIQUE — Vérification croisée
-Après extraction, vérifie que :
-- La somme de tes lignes d'actif est cohérente avec le TOTAL ACTIF affiché dans le document.
-- La somme de tes lignes de passif est cohérente avec le TOTAL PASSIF affiché.
-- Si l'écart est > 5%, tu as probablement une erreur de colonne ou de double comptage. Relis le tableau.
+### Vérification obligatoire
+Avant de répondre, vérifie : somme de tes postes de détail ≈ total affiché (tolérance 5%).
+Si l'écart est trop grand, tu as probablement confondu des colonnes ou double-compté.
+
+### Portée des tableaux
+- Pour les champs de type tableau financier, prends UNIQUEMENT les tableaux principaux Actif, Passif et Compte de résultat.
+- Privilégie les tableaux présentés au début du document d'états financiers / bilan.
+- Ignore les annexes, notes, tableaux détaillés secondaires, SIG et reprises plus loin dans le document.
+
+### Extraction ligne par ligne
+- Pour les champs de type tableau, retourne UNE entrée par ligne qui contient au moins un montant lisible en N ou N-1.
+- N'ignore pas une ligne chiffrée même si son libellé te paraît inhabituel ou difficile à classifier.
+- N'inclus pas les lignes purement textuelles ou les en-têtes sans montant.
 """
 
     return f"""Tu es un analyste financier expert. Tu extrais des informations précises depuis des documents de projet immobilier (crowdfunding obligataire).
@@ -781,6 +815,751 @@ def _stringify_non_table_value(value) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+def _has_meaningful_value(value) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return value.strip() not in {"", "null", "[]", "{}"}
+    if isinstance(value, (list, dict, tuple, set)):
+        return len(value) > 0
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Validation post-LLM des tables financières
+# ---------------------------------------------------------------------------
+
+# Tolérance pour la vérification des sommes (5%)
+_VALIDATION_TOLERANCE = 0.05
+
+# Postes de détail qui doivent sommer vers total_actif
+_ACTIF_DETAIL_KEYS = [
+    "immobilisations_corporelles", "immobilisations_financieres",
+    "stocks", "creances_clients", "autres_creances",
+    "disponibilites", "vmp", "charges_constatees_avance",
+    "autres_actif_residuel",
+]
+
+# Postes de détail qui doivent sommer vers total_passif
+_PASSIF_DETAIL_KEYS = [
+    "capitaux_propres", "dettes_bancaires", "autres_dettes_financieres",
+    "fournisseurs", "dettes_fiscales_sociales", "dettes_diverses",
+    "provisions_pour_risques", "provisions_pour_charges",
+    "produits_constates_avance", "autres_passif_residuel",
+]
+
+# Postes de charges du CDR (doivent sommer vers charges si affiché)
+_CDR_CHARGES_KEYS = [
+    "achats_marchandises", "variation_stock_marchandises",
+    "achats_matieres_premieres", "variation_stock_matieres_premieres",
+    "autres_charges_externes", "salaires", "charges_sociales",
+    "impots_taxes", "dotations_amortissements", "dotations_provisions",
+    "autres_charges_exploitation",
+]
+
+
+# ---------------------------------------------------------------------------
+# Mapping poste brut (LLM) → clé canonique (Excel)
+# ---------------------------------------------------------------------------
+# Chaque entrée : normalized_poste → (canonical_key, is_total)
+# is_total=True  → c'est un sous-total ou total de section, on le préfère
+# is_total=False → c'est une ligne de détail, on la somme si pas de total
+# canonical_key=None → ligne à ignorer (en-tête de section, etc.)
+
+def _normalize_poste(poste: str) -> str:
+    """Normalise un libellé de poste pour le matching."""
+    return canonical_name(poste).replace(" ", "")
+
+
+_ACTIF_POSTE_MAP = {
+    # --- Immobilisations incorporelles → autres_actif_residuel ---
+    "immobilisationsincorporelles": ("autres_actif_residuel", True),
+    "totalimmobilisationsincorporelles": ("autres_actif_residuel", True),
+    "fraisdestablissement": ("autres_actif_residuel", False),
+    "fraisderechercheetdeveloppement": ("autres_actif_residuel", False),
+    "concessionsbrevetslicencesmarquesprocedes": ("autres_actif_residuel", False),
+    "fondscommercial": ("autres_actif_residuel", False),
+
+    # --- Immobilisations corporelles ---
+    "immobilisationscorporelles": ("immobilisations_corporelles", True),
+    "totalimmobilisationscorporelles": ("immobilisations_corporelles", True),
+    "terrains": ("immobilisations_corporelles", False),
+    "constructions": ("immobilisations_corporelles", False),
+    "installationstechniquesmaterieletoutillageindustriels": ("immobilisations_corporelles", False),
+    "installationstechniques": ("immobilisations_corporelles", False),
+    "materieletoutillage": ("immobilisations_corporelles", False),
+    "materiel": ("immobilisations_corporelles", False),
+    "autresimmobilisationscorporelles": ("immobilisations_corporelles", False),
+    "immobilisationscorporellesencours": ("immobilisations_corporelles", False),
+    "avancesetacomptessurimmobilisationscorporelles": ("immobilisations_corporelles", False),
+
+    # --- Immobilisations financières ---
+    "immobilisationsfinancieres": ("immobilisations_financieres", True),
+    "totalimmobilisationsfinancieres": ("immobilisations_financieres", True),
+    "participations": ("immobilisations_financieres", False),
+    "autresparticipations": ("immobilisations_financieres", False),
+    "participationsevalueesparmiseenequivalence": ("immobilisations_financieres", False),
+    "creancesrattacheesadesparticipations": ("immobilisations_financieres", False),
+    "autrestitresimmobilises": ("immobilisations_financieres", False),
+    "prets": ("immobilisations_financieres", False),
+    "autresimmobilisationsfinancieres": ("immobilisations_financieres", False),
+
+    # --- Stocks ---
+    "stocks": ("stocks", True),
+    "stocksetencours": ("stocks", True),
+    "totalstocksetencours": ("stocks", True),
+    "matierespremieresetautresapprovisionnements": ("stocks", False),
+    "matierespremieres": ("stocks", False),
+    "encoursdeproduction": ("stocks", False),
+    "encoursdeproductiondebiens": ("stocks", False),
+    "encoursdeproductiondeservices": ("stocks", False),
+    "produitsintermediairesetfinis": ("stocks", False),
+    "marchandises": ("stocks", False),
+
+    # --- Créances ---
+    "creances": ("creances", True),
+    "totalcreances": ("creances", True),
+    "creancesclients": ("creances_clients", True),
+    "clientsetcomptesrattaches": ("creances_clients", True),
+    "clients": ("creances_clients", True),
+    "autrescreances": ("autres_creances", True),
+    "personnel": ("autres_creances", False),
+    "etatetautrescollectivitespubliques": ("autres_creances", False),
+    "securitesocialeetautresorganismessociaux": ("autres_creances", False),
+    "impotssurlesbenefices": ("autres_creances", False),
+    "taxesurlavaleurajoutee": ("autres_creances", False),
+    "autrescreancesdiverses": ("autres_creances", False),
+    "fournisseursdebiteursavancesetacomptes": ("autres_creances", False),
+    "capitalsouscritappelenonverse": ("autres_actif_residuel", False),
+
+    # --- Trésorerie ---
+    "tresorerie": ("tresorerie", True),
+    "disponibilites": ("disponibilites", True),
+    "valeursmobilieresdeplacement": ("vmp", True),
+    "vmp": ("vmp", True),
+
+    # --- Divers ---
+    "chargesconstateesdavance": ("charges_constatees_avance", True),
+    "capitalsouscritnonappele": ("autres_actif_residuel", True),
+    "avancesetacomptesversessurcommandes": ("autres_actif_residuel", True),
+
+    # --- Totaux de section à ignorer (on ne les mappe pas) ---
+    "actifimmobilise": (None, True),
+    "totalactifimmobilise": (None, True),
+    "actifcirculant": (None, True),
+    "totalactifcirculant": (None, True),
+
+    # --- Total général ---
+    "totalactif": ("total_actif", True),
+    "totalgeneralactif": ("total_actif", True),
+    "totalgeneral": ("total_actif", True),
+}
+
+_PASSIF_POSTE_MAP = {
+    # --- Capitaux propres ---
+    "capitalsocial": ("capital_social", True),
+    "capitalindividuel": ("capital_social", True),
+    "capital": ("capital_social", True),
+    "primesdemission": ("capitaux_propres_detail", False),
+    "primesdapport": ("capitaux_propres_detail", False),
+    "primesdefusionscission": ("capitaux_propres_detail", False),
+    "ecartsderevaluation": ("capitaux_propres_detail", False),
+    "reservelegale": ("capitaux_propres_detail", False),
+    "reservesstatutairesetcontractuelles": ("capitaux_propres_detail", False),
+    "reservesreglementees": ("capitaux_propres_detail", False),
+    "autresreserves": ("capitaux_propres_detail", False),
+    "reserves": ("capitaux_propres_detail", False),
+    "reportanouveau": ("capitaux_propres_detail", False),
+    "resultatdelexercice": ("resultat_exercice", True),
+    "resultatdeexercice": ("resultat_exercice", True),
+    "resultatexercice": ("resultat_exercice", True),
+    "benefice": ("resultat_exercice", True),
+    "perte": ("resultat_exercice", True),
+    "resultat": ("resultat_exercice", True),
+    "resultatnet": ("resultat_exercice", True),
+    "subventionsdinvestissement": ("capitaux_propres_detail", False),
+    "provisionsreglementees": ("capitaux_propres_detail", False),
+    "capitauxpropres": ("capitaux_propres", True),
+    "totalcapitauxpropres": ("capitaux_propres", True),
+
+    # --- Provisions ---
+    "provisionspourrisques": ("provisions_pour_risques", True),
+    "provisionspourcharges": ("provisions_pour_charges", True),
+    "provisions": ("provisions_pour_risques", True),
+    "totalprovisions": ("provisions_pour_risques", True),
+    "provisionspourrisquesetcharges": ("provisions_pour_risques", True),
+
+    # --- Dettes financières ---
+    "empruntsetdettesaupresdesetablissementsdecredit": ("dettes_bancaires", True),
+    "empruntsbancaires": ("dettes_bancaires", True),
+    "dettesbancaires": ("dettes_bancaires", True),
+    "empruntsaupresdesetablissementsdecredit": ("dettes_bancaires", True),
+    "empruntsobligatairesconvertibles": ("autres_dettes_financieres", False),
+    "empruntsobligataires": ("autres_dettes_financieres", False),
+    "autresempruntsobligataires": ("autres_dettes_financieres", False),
+    "comptescourantsdassocies": ("autres_dettes_financieres", True),
+    "comptescourantsassocies": ("autres_dettes_financieres", True),
+    "comptescourants": ("autres_dettes_financieres", True),
+    "cca": ("autres_dettes_financieres", True),
+    "autresdettesfinancieres": ("autres_dettes_financieres", True),
+    "empruntsetdettesfinancieresdivers": ("autres_dettes_financieres", True),
+    "empruntsetdettesfinancieresdiverses": ("autres_dettes_financieres", True),
+    "dettesfinancieres": ("dettes_financieres", True),
+    "totaldettesfinancieres": ("dettes_financieres", True),
+
+    # --- Dettes d'exploitation ---
+    "fournisseurs": ("fournisseurs", True),
+    "fournisseursetcomptesrattaches": ("fournisseurs", True),
+    "dettesfournisseurs": ("fournisseurs", True),
+    "dettesfiscalesetsociales": ("dettes_fiscales_sociales", True),
+    "dettesfiscalessociales": ("dettes_fiscales_sociales", True),
+    "dettessociales": ("dettes_fiscales_sociales", False),
+    "dettesfiscales": ("dettes_fiscales_sociales", False),
+    "dettesexploitation": ("dettes_exploitation", True),
+    "totaldettesdexploitation": ("dettes_exploitation", True),
+
+    # --- Dettes diverses ---
+    "dettessurimmobilisations": ("autres_passif_residuel", True),
+    "dettessurimmobilisationsetcomptesrattaches": ("autres_passif_residuel", True),
+    "autresdettes": ("dettes_diverses", True),
+    "dettesdiverses": ("dettes_diverses", True),
+
+    # --- Produits constatés d'avance ---
+    "produitsconstatesdavance": ("produits_constates_avance", True),
+
+    # --- Totaux de section à ignorer ---
+    "dettes": (None, True),
+    "totaldettes": (None, True),
+    "totaldettesdivers": (None, True),
+
+    # --- Total général ---
+    "totalpassif": ("total_passif", True),
+    "totalgeneralpassif": ("total_passif", True),
+    "totalgeneral": ("total_passif", True),
+}
+
+_CDR_POSTE_MAP = {
+    # --- Produits d'exploitation ---
+    "ventesdemarchandises": ("chiffre_affaires", False),
+    "productionvenduedebiens": ("chiffre_affaires", False),
+    "productionvenduedeservices": ("chiffre_affaires", False),
+    "productionvendue": ("chiffre_affaires", False),
+    "chiffredaffaires": ("chiffre_affaires", True),
+    "chiffredaffairesnet": ("chiffre_affaires", True),
+    "montantnetduchiffredaffaires": ("chiffre_affaires", True),
+    "ca": ("chiffre_affaires", True),
+
+    "productionstockee": ("production_stockee", True),
+    "productionimmobilisee": ("production_stockee", False),
+
+    "subventionsdexploitation": ("subventions_exploitation", True),
+    "subventionsdexploitationrecues": ("subventions_exploitation", True),
+
+    "reprisesuramortissementsetprovisionstransfertdecharges": ("reprises_exploitation", True),
+    "reprisesuramortissementsetprovisionstransfertsdecharges": ("reprises_exploitation", True),
+    "reprisesuramortissementsetprovisions": ("reprises_exploitation", True),
+    "reprisessurdepreciationsetprovisions": ("reprises_exploitation", True),
+    "transfertsdecharges": ("reprises_exploitation", False),
+
+    "autresproduits": ("autres_produits_exploitation", True),
+    "autresproduitsdexploitation": ("autres_produits_exploitation", True),
+    "autresproduitsexploitation": ("autres_produits_exploitation", True),
+
+    # --- Charges d'exploitation ---
+    "achatsdemarchandises": ("achats_marchandises", True),
+    "achatsmarchandises": ("achats_marchandises", True),
+    "variationdestockdemarchandises": ("variation_stock_marchandises", True),
+    "variationdesstocksdemarchandises": ("variation_stock_marchandises", True),
+    "variationdestockmarchandises": ("variation_stock_marchandises", True),
+
+    "achatsdematieresetautresapprovisionnements": ("achats_matieres_premieres", True),
+    "achatsdematierespremieres": ("achats_matieres_premieres", True),
+    "achatsdematiespremieresetautresapprovisionnements": ("achats_matieres_premieres", True),
+    "achatsetapprovisionnements": ("autres_charges_externes", True),
+    "variationdestockdematierespremieresetapprovisionnements": ("variation_stock_matieres_premieres", True),
+    "variationdesstocksdematierespremieresetapprovisionnements": ("variation_stock_matieres_premieres", True),
+    "variationdestockmatierespremieres": ("variation_stock_matieres_premieres", True),
+
+    "autresachatsetchargesexternes": ("autres_charges_externes", True),
+    "autresachatschargesexternes": ("autres_charges_externes", True),
+    "chargesexternes": ("autres_charges_externes", True),
+    "achatsetchargesexternes": ("autres_charges_externes", True),
+
+    "salairesettraitements": ("salaires", True),
+    "salaires": ("salaires", True),
+    "remunerationsdupersonnel": ("salaires", True),
+    "chargessociales": ("charges_sociales", True),
+    "chargessocialesdupersonnel": ("charges_sociales", True),
+
+    "impotstaxesetversementsassimiles": ("impots_taxes", True),
+    "impotsettaxes": ("impots_taxes", True),
+    "impotsetversementsassimiles": ("impots_taxes", True),
+
+    "dotationsauxamortissementssurimmobilisations": ("dotations_amortissements", True),
+    "dotationsauxamortissements": ("dotations_amortissements", True),
+    "dotationsamortissements": ("dotations_amortissements", True),
+    "dotationsauxprovisions": ("dotations_provisions", True),
+    "dotationsauxdepreciations": ("dotations_provisions", True),
+    "dotationsauxamortissementsetprovisions": ("dotations", True),
+    "dotationsauxamortissementsdepreciationsetprovisions": ("dotations", True),
+    "dotationsdexploitation": ("dotations", True),
+    "dotations": ("dotations", True),
+
+    "autrescharges": ("autres_charges_exploitation", True),
+    "autreschargesdexploitation": ("autres_charges_exploitation", True),
+    "autreschargesexploitation": ("autres_charges_exploitation", True),
+
+    # --- Totaux et résultats ---
+    "totalchargesdexploitation": ("charges", True),
+    "chargesdexploitation": ("charges", True),
+    "totaldeschargesdexploitation": ("charges", True),
+    "totalproduitsdexploitation": (None, True),
+    "produitsdexploitation": (None, True),
+
+    "resultatdexploitation": ("resultat_exploitation", True),
+    "resultatexploitation": ("resultat_exploitation", True),
+
+    # --- Résultat financier ---
+    "produitsfinanciers": (None, True),
+    "chargesfinancieres": (None, True),
+    "totaldesproduitsfinanciers": (None, True),
+    "totaldeschargesfinancieres": (None, True),
+    "resultatfinancier": ("resultat_financier", True),
+
+    # --- Résultat exceptionnel ---
+    "produitsexceptionnels": (None, True),
+    "chargesexceptionnelles": (None, True),
+    "totaldesproduitsexceptionnels": (None, True),
+    "totaldeschargesexceptionnelles": (None, True),
+    "resultatexceptionnel": ("resultat_exceptionnel", True),
+
+    # --- Impôts ---
+    "impotssurlesbenefices": ("impots_sur_les_societes", True),
+    "impotssurlessocietes": ("impots_sur_les_societes", True),
+    "is": ("impots_sur_les_societes", True),
+
+    # --- Totaux globaux à ignorer ---
+    "totaldesproduits": (None, True),
+    "totaldescharges": (None, True),
+    "resultatnet": (None, True),
+    "beneficeouperte": (None, True),
+}
+
+# Table type → mapping dict
+_TABLE_POSTE_MAPS = {
+    "bilan_actif_table": _ACTIF_POSTE_MAP,
+    "bilan_passif_table": _PASSIF_POSTE_MAP,
+    "bilan_compte_resultat_table": _CDR_POSTE_MAP,
+}
+
+
+def _sum_raw_rows(rows: List[Dict], canonical_key: str) -> Dict:
+    """Somme les valeurs de plusieurs lignes brutes en un seul objet canonique."""
+    total_n = 0.0
+    total_n1 = 0.0
+    has_n = False
+    has_n1 = False
+    postes = []
+
+    for r in rows:
+        n = _safe_number(r.get("n"))
+        n1 = _safe_number(r.get("n1"))
+        if n is not None:
+            total_n += n
+            has_n = True
+        if n1 is not None:
+            total_n1 += n1
+            has_n1 = True
+        postes.append(r.get("poste", ""))
+
+    return {
+        "key": canonical_key,
+        "poste": " + ".join(postes),
+        "n": total_n if has_n else None,
+        "n1": total_n1 if has_n1 else None,
+        "commentaires": f"Somme Python de {len(rows)} sous-lignes",
+    }
+
+
+def _row_has_numeric_amount(row: Dict) -> bool:
+    return _safe_number(row.get("n")) is not None or _safe_number(row.get("n1")) is not None
+
+
+def _build_preserved_raw_row(
+    row: Dict,
+    table_type: str,
+    source_index: int,
+    reason: str,
+) -> Dict:
+    table_suffix = table_type.replace("bilan_", "").replace("_table", "")
+    existing_comment = (row.get("commentaires") or "").strip()
+    comment_parts = [part for part in [existing_comment, reason] if part]
+    return {
+        "key": f"raw_unmatched_{table_suffix}_{source_index:03d}",
+        "poste": row.get("poste", ""),
+        "n": row.get("n"),
+        "n1": row.get("n1"),
+        "commentaires": " | ".join(comment_parts),
+        "_source_index": source_index,
+    }
+
+
+def _map_raw_financial_table(raw_rows: list, table_type: str) -> list:
+    """Transforme les lignes brutes du LLM en lignes canoniques avec clé.
+
+    Logique :
+    1. Chaque poste est normalisé et cherché dans le mapping.
+    2. Si un sous-total (is_total=True) est trouvé pour une clé, il est préféré.
+    3. Si seuls des détails (is_total=False) existent, ils sont sommés.
+    4. Les lignes inconnues ou à ignorer (canonical_key=None) sont loguées.
+    """
+    poste_map = _TABLE_POSTE_MAPS.get(table_type, {})
+    if not poste_map:
+        return raw_rows  # pas de mapping pour ce type, retourner tel quel
+
+    # Grouper par clé canonique : {key → {"totals": [...], "details": [...]}}
+    groups: Dict[str, Dict[str, list]] = {}
+    unmatched: List[str] = []
+    preserved_raw_rows: List[Dict] = []
+
+    for source_index, row in enumerate(raw_rows):
+        if not isinstance(row, dict):
+            continue
+        poste = row.get("poste", "")
+        if not poste:
+            continue
+
+        norm = _normalize_poste(poste)
+        if not norm:
+            continue
+
+        match = poste_map.get(norm)
+        if match is None:
+            # Essai partiel : chercher si le poste normalisé est contenu dans une clé
+            match = _fuzzy_match_poste(norm, poste_map)
+
+        if match is None:
+            unmatched.append(poste)
+            if _row_has_numeric_amount(row):
+                preserved_raw_rows.append(
+                    _build_preserved_raw_row(
+                        row,
+                        table_type,
+                        source_index,
+                        "Ligne conservee: poste non mappe vers une cle Excel",
+                    )
+                )
+            continue
+
+        canonical_key, is_total = match
+        if canonical_key is None:
+            if _row_has_numeric_amount(row):
+                preserved_raw_rows.append(
+                    _build_preserved_raw_row(
+                        row,
+                        table_type,
+                        source_index,
+                        "Ligne conservee: total ou section non exploite(e) par Excel",
+                    )
+                )
+            continue  # ligne à ignorer (en-tête de section)
+
+        if canonical_key not in groups:
+            groups[canonical_key] = {"totals": [], "details": [], "first_index": source_index}
+
+        if is_total:
+            groups[canonical_key]["totals"].append(row)
+        else:
+            groups[canonical_key]["details"].append(row)
+
+    # Résoudre chaque groupe
+    result = []
+    for canonical_key, group in groups.items():
+        if group["totals"]:
+            # Prendre le dernier sous-total (dans l'ordre du document)
+            best = group["totals"][-1]
+            result.append({
+                "key": canonical_key,
+                "poste": best.get("poste", ""),
+                "n": best.get("n"),
+                "n1": best.get("n1"),
+                "commentaires": best.get("commentaires", ""),
+                "_source_index": group["first_index"],
+            })
+        elif group["details"]:
+            if len(group["details"]) == 1:
+                row = group["details"][0]
+                result.append({
+                    "key": canonical_key,
+                    "poste": row.get("poste", ""),
+                    "n": row.get("n"),
+                    "n1": row.get("n1"),
+                    "commentaires": row.get("commentaires", ""),
+                    "_source_index": group["first_index"],
+                })
+            else:
+                summed_row = _sum_raw_rows(group["details"], canonical_key)
+                summed_row["_source_index"] = group["first_index"]
+                result.append(summed_row)
+
+    result.extend(preserved_raw_rows)
+    result.sort(key=lambda row: row.get("_source_index", 10**9))
+    for row in result:
+        row.pop("_source_index", None)
+
+    if unmatched:
+        logger.info(
+            "    ⚠️ %s poste(s) non matché(s) dans %s, %s ligne(s) brute(s) conservée(s)",
+            len(unmatched),
+            table_type,
+            len(preserved_raw_rows),
+        )
+        logger.debug("    Postes non matchés (%s) : %s", table_type, ", ".join(unmatched[:10]))
+
+    return result
+
+
+def _fuzzy_match_poste(
+    norm_poste: str,
+    poste_map: Dict[str, tuple],
+) -> Optional[tuple]:
+    """Matching approximatif : cherche si norm_poste contient une clé du mapping ou vice-versa."""
+    # D'abord : le poste contient-il une clé connue ? (ex: "totalimmobilisationscorporellesnet" contient "immobilisationscorporelles")
+    best_match = None
+    best_len = 0
+    for map_key, value in poste_map.items():
+        if value[0] is None:
+            continue  # ignorer les entrées à skip
+        if len(map_key) < 6:
+            continue  # trop court pour un match partiel fiable
+        if map_key in norm_poste and len(map_key) > best_len:
+            best_match = value
+            best_len = len(map_key)
+    return best_match
+
+
+# Gestion spéciale du passif : capitaux_propres_detail doit être ignoré
+# (ces lignes sont des sous-composants de capitaux_propres qui est un total)
+# On les utilise seulement si capitaux_propres n'est pas trouvé
+def _post_process_passif(mapped_rows: list) -> list:
+    """Post-traitement du passif : fusionner capitaux_propres_detail si nécessaire."""
+    has_capitaux_propres = any(r["key"] == "capitaux_propres" for r in mapped_rows)
+    result = []
+    for row in mapped_rows:
+        if row["key"] == "capitaux_propres_detail":
+            if not has_capitaux_propres:
+                # Pas de total affiché → on utilise la somme des détails comme capitaux propres.
+                row["key"] = "capitaux_propres"
+                result.append(row)
+            # Sinon on les ignore (déjà inclus dans le total)
+        else:
+            result.append(row)
+    return result
+
+
+def _safe_number(value) -> Optional[float]:
+    """Convertit une valeur en float, retourne None si impossible."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        cleaned = value.strip().replace(" ", "").replace("\u00a0", "")
+        if not cleaned:
+            return None
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
+    return None
+
+
+def _build_table_dict(table_data) -> Dict[str, Dict]:
+    """Construit un dict key → row_data à partir d'un array JSON ou string."""
+    if isinstance(table_data, str):
+        try:
+            table_data = json.loads(table_data)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+    if not isinstance(table_data, list):
+        return {}
+    result = {}
+    for row in table_data:
+        if isinstance(row, dict) and row.get("key"):
+            result[row["key"]] = row
+    return result
+
+
+def _sum_keys(table_dict: Dict[str, Dict], keys: List[str], period: str = "n") -> Optional[float]:
+    """Somme les valeurs d'un ensemble de clés pour une période donnée."""
+    total = 0.0
+    any_value = False
+    for key in keys:
+        row = table_dict.get(key)
+        if not row:
+            continue
+        val = _safe_number(row.get(period))
+        if val is not None:
+            total += val
+            any_value = True
+    return total if any_value else None
+
+
+def _validate_actif_table(table_data) -> List[str]:
+    """Valide la cohérence du bilan actif. Retourne une liste d'erreurs."""
+    d = _build_table_dict(table_data)
+    if not d:
+        return []
+    errors = []
+
+    for period in ("n", "n1"):
+        total_row = d.get("total_actif")
+        total_val = _safe_number(total_row.get(period)) if total_row else None
+        if total_val is None or total_val == 0:
+            continue
+
+        detail_sum = _sum_keys(d, _ACTIF_DETAIL_KEYS, period)
+        if detail_sum is not None and detail_sum > 0:
+            ecart = abs(detail_sum - total_val) / abs(total_val)
+            if ecart > _VALIDATION_TOLERANCE:
+                errors.append(
+                    f"ACTIF {period}: somme détails={detail_sum:.0f} vs total_actif={total_val:.0f} "
+                    f"(écart {ecart:.0%}). Probable double-comptage ou poste manquant."
+                )
+
+    return errors
+
+
+def _validate_passif_table(table_data) -> List[str]:
+    """Valide la cohérence du bilan passif. Retourne une liste d'erreurs."""
+    d = _build_table_dict(table_data)
+    if not d:
+        return []
+    errors = []
+
+    for period in ("n", "n1"):
+        total_row = d.get("total_passif")
+        total_val = _safe_number(total_row.get(period)) if total_row else None
+        if total_val is None or total_val == 0:
+            continue
+
+        detail_sum = _sum_keys(d, _PASSIF_DETAIL_KEYS, period)
+        if detail_sum is not None and detail_sum > 0:
+            ecart = abs(detail_sum - total_val) / abs(total_val)
+            if ecart > _VALIDATION_TOLERANCE:
+                errors.append(
+                    f"PASSIF {period}: somme détails={detail_sum:.0f} vs total_passif={total_val:.0f} "
+                    f"(écart {ecart:.0%}). Probable double-comptage ou poste manquant."
+                )
+
+    return errors
+
+
+def _validate_cdr_table(table_data) -> List[str]:
+    """Valide la cohérence du compte de résultat."""
+    d = _build_table_dict(table_data)
+    if not d:
+        return []
+    errors = []
+
+    for period in ("n", "n1"):
+        # Vérif : CA - charges ≈ résultat exploitation (approximatif)
+        ca_val = _safe_number(d.get("chiffre_affaires", {}).get(period))
+        re_val = _safe_number(d.get("resultat_exploitation", {}).get(period))
+        charges_val = _safe_number(d.get("charges", {}).get(period))
+
+        if ca_val is not None and re_val is not None and charges_val is not None:
+            expected_re = ca_val - charges_val
+            if abs(re_val) > 0:
+                ecart = abs(expected_re - re_val) / max(abs(re_val), 1)
+                if ecart > _VALIDATION_TOLERANCE:
+                    # Vérifier avec les détails des charges
+                    detail_charges = _sum_keys(d, _CDR_CHARGES_KEYS, period)
+                    if detail_charges is not None and detail_charges > 0:
+                        expected_re2 = ca_val - detail_charges
+                        ecart2 = abs(expected_re2 - re_val) / max(abs(re_val), 1)
+                        if ecart2 > _VALIDATION_TOLERANCE:
+                            errors.append(
+                                f"CDR {period}: CA={ca_val:.0f} - charges détaillées={detail_charges:.0f} "
+                                f"= {expected_re2:.0f} vs résultat_exploitation={re_val:.0f} "
+                                f"(écart {ecart2:.0%})."
+                            )
+
+        # Vérif : si charges total affiché et somme détails
+        if charges_val is not None and charges_val > 0:
+            detail_charges = _sum_keys(d, _CDR_CHARGES_KEYS, period)
+            if detail_charges is not None and detail_charges > 0:
+                ecart = abs(detail_charges - charges_val) / abs(charges_val)
+                if ecart > _VALIDATION_TOLERANCE:
+                    errors.append(
+                        f"CDR {period}: somme charges détaillées={detail_charges:.0f} vs "
+                        f"charges total={charges_val:.0f} (écart {ecart:.0%})."
+                    )
+
+    return errors
+
+
+def validate_financial_answers(answers: Dict) -> Dict[str, List[str]]:
+    """Valide toutes les tables financières dans les réponses. Retourne {field_id: [erreurs]}."""
+    all_errors: Dict[str, List[str]] = {}
+
+    for key, value in answers.items():
+        if value is None:
+            continue
+        if "bilan_actif_table" in key:
+            errs = _validate_actif_table(value)
+            if errs:
+                all_errors[key] = errs
+        elif "bilan_passif_table" in key:
+            errs = _validate_passif_table(value)
+            if errs:
+                all_errors[key] = errs
+        elif "bilan_compte_resultat_table" in key:
+            errs = _validate_cdr_table(value)
+            if errs:
+                all_errors[key] = errs
+
+    return all_errors
+
+
+def _build_correction_prompt(
+    original_prompt: str,
+    answers: Dict,
+    errors: Dict[str, List[str]],
+) -> str:
+    """Construit un prompt de correction ciblé à partir des erreurs de validation."""
+    error_details = []
+    fields_to_redo = []
+    for field_id, errs in errors.items():
+        # Extraire le field_id de base (sans suffixe __N)
+        base_id = field_id.split("__")[0] if "__" in field_id else field_id
+        fields_to_redo.append(base_id)
+        for err in errs:
+            error_details.append(f"- {err}")
+
+    error_block = "\n".join(error_details)
+    fields_block = ", ".join(sorted(set(fields_to_redo)))
+
+    return f"""{original_prompt}
+
+## CORRECTION REQUISE
+
+Ta réponse précédente contenait des incohérences détectées automatiquement :
+
+{error_block}
+
+Ré-extrais en priorité les champs suivants en corrigeant les erreurs : {fields_block}
+
+Causes fréquentes d'erreur :
+1. DOUBLE COMPTAGE : un même montant apparaît dans 2 postes différents (ex: immobilisations_financieres ET autres_actif_residuel).
+2. MAUVAISE COLONNE : confusion entre Brut et Net, ou entre N et N-1.
+3. TOTAL vs DÉTAIL : le total d'une section est mis dans un poste de détail au lieu du sous-total.
+
+Vérifie que la somme de tes postes de détail est cohérente avec le total affiché (tolérance 5%).
+Tu peux retourner soit le JSON complet, soit uniquement les champs corrigés.
+"""
+
+
 def run(project_id: str):
     project_dir = OUTPUT_DIR / project_id
     manifest_path = project_dir / "manifest.json"
@@ -919,6 +1698,10 @@ def run(project_id: str):
             max_chars=FINANCIAL_MAX_CHARS if broad_financial_context else MAX_CHARS,
             preserve_order=broad_financial_context,
             neighbor_parents=FINANCIAL_NEIGHBOR_PARENTS if broad_financial_context else 0,
+            append_unmatched_tail=not broad_financial_context,
+            max_relative_page_window=(
+                FINANCIAL_MAX_RELATIVE_PAGE_WINDOW if broad_financial_context else None
+            ),
         )
         token_est = doc_info.get("token_estimate", 0)
         chars_sent = len(doc_text)
@@ -954,7 +1737,6 @@ def run(project_id: str):
         try:
             answers = json.loads(raw_response)
         except json.JSONDecodeError:
-            import re
             json_match = re.search(r'```json\s*(.*?)\s*```', raw_response, re.DOTALL)
             if json_match:
                 answers = json.loads(json_match.group(1))
@@ -962,10 +1744,77 @@ def run(project_id: str):
                 logger.error(f"    ❌ Réponse non-JSON : {raw_response[:100]}")
                 answers = {}
 
+        # --- Mapping postes bruts → clés canoniques ---
+        if answers and broad_financial_context:
+            for fid in ("bilan_actif_table", "bilan_passif_table", "bilan_compte_resultat_table"):
+                raw_val = answers.get(fid)
+                if isinstance(raw_val, list):
+                    mapped = _map_raw_financial_table(raw_val, fid)
+                    if fid == "bilan_passif_table":
+                        mapped = _post_process_passif(mapped)
+                    answers[fid] = mapped
+                    logger.info(
+                        f"    🔄 Mapping {fid}: {len(raw_val)} lignes brutes → {len(mapped)} clés canoniques"
+                    )
+
+        # --- Validation post-LLM + retry si incohérence ---
+        if answers and broad_financial_context:
+            validation_errors = validate_financial_answers(answers)
+            if validation_errors:
+                error_count = sum(len(e) for e in validation_errors.values())
+                logger.warning(
+                    f"    ⚠️ {error_count} incohérence(s) détectée(s), retry avec correction..."
+                )
+                for field_id, errs in validation_errors.items():
+                    for err in errs:
+                        logger.warning(f"      → {err}")
+
+                correction_prompt = _build_correction_prompt(prompt, answers, validation_errors)
+                try:
+                    corrected_response = _call_llm_with_retry(call_llm, correction_prompt)
+                    if corrected_response:
+                        try:
+                            corrected = json.loads(corrected_response)
+                        except json.JSONDecodeError:
+                            json_match = re.search(
+                                r'```json\s*(.*?)\s*```', corrected_response, re.DOTALL
+                            )
+                            corrected = json.loads(json_match.group(1)) if json_match else None
+
+                        if corrected:
+                            # Re-mapper les résultats corrigés
+                            for fid in ("bilan_actif_table", "bilan_passif_table", "bilan_compte_resultat_table"):
+                                raw_val = corrected.get(fid)
+                                if isinstance(raw_val, list):
+                                    mapped = _map_raw_financial_table(raw_val, fid)
+                                    if fid == "bilan_passif_table":
+                                        mapped = _post_process_passif(mapped)
+                                    corrected[fid] = mapped
+
+                            # Vérifier si la correction est meilleure
+                            new_errors = validate_financial_answers(corrected)
+                            new_error_count = sum(len(e) for e in new_errors.values())
+                            if new_error_count < error_count:
+                                logger.info(
+                                    f"    ✅ Correction acceptée ({error_count} → {new_error_count} erreurs)"
+                                )
+                                merged_answers = dict(answers)
+                                merged_answers.update(corrected)
+                                answers = merged_answers
+                            else:
+                                logger.info(
+                                    f"    ⚠️ Correction pas meilleure ({new_error_count} erreurs), "
+                                    f"on garde la réponse originale"
+                                )
+                except Exception as e:
+                    logger.warning(f"    ⚠️ Retry de correction échoué : {e}")
+
+                time.sleep(2)
+
         # --- Merger les champs globaux (première valeur non-null gagne) ---
         found = 0
         for field_id, value in answers.items():
-            if field_id == _PROJECT_LOCATION_FIELD_ID and value is not None:
+            if field_id == _PROJECT_LOCATION_FIELD_ID and _has_meaningful_value(value):
                 project_location_candidates.append({
                     "document_id": document_id,
                     "filename": filename,
@@ -973,7 +1822,11 @@ def run(project_id: str):
                     "value": _stringify_non_table_value(value),
                 })
                 continue
-            if field_id in results and value is not None and results[field_id] is None:
+            if (
+                field_id in results
+                and _has_meaningful_value(value)
+                and not _has_meaningful_value(results[field_id])
+            ):
                 results[field_id] = _stringify_non_table_value(value)
                 found += 1
 
@@ -984,10 +1837,10 @@ def run(project_id: str):
             for f in matched_person:
                 fid = f["field_id"]
                 value = answers.get(fid)
-                if value is not None:
+                if _has_meaningful_value(value):
                     key = fid + suffix
                     # Première valeur non-null gagne (comme pour les globaux)
-                    if key in results and results[key] is not None:
+                    if key in results and _has_meaningful_value(results[key]):
                         continue
                     if isinstance(value, list):
                         if f.get("type") == "table":
@@ -1018,9 +1871,9 @@ def run(project_id: str):
                 for f in matched_company:
                     fid = f["field_id"]
                     value = answers.get(fid)
-                    if value is not None:
+                    if _has_meaningful_value(value):
                         key = fid + suffix
-                        if key in results and results[key] is not None:
+                        if key in results and _has_meaningful_value(results[key]):
                             continue
                         if isinstance(value, list):
                             if f.get("type") == "table":

@@ -2,34 +2,25 @@
   "_description": "Champs à extraire des documents projet pour remplir le tableau Excel Book1.xlsx",
   "_notes": [
     "MODE TEST COUT REDUIT : uniquement les champs bilan / compte de résultat.",
-    "On privilégie les lignes natives des liasses fiscales (2033-A/B, 2051/2052/2053) plutôt que des agrégats métier reconstruits trop tôt.",
-    "Les agrégats Excel sont ensuite recalculés en Python à partir des lignes natives et comparés aux lignes source quand elles existent."
+    "Le LLM recopie les lignes telles quelles depuis le document. Le mapping vers les clés canoniques est fait en Python.",
+    "Format de sortie : array de {poste, n, n1} — le LLM lit, Python classifie."
   ],
   "fields": [
-    {
-      "_comment": "=== MODE TEST COUT REDUIT : seulement bilan et compte de resultat ==="
-    },
     {
       "_comment": "=== TABLE 3 : BILAN / COMPTE DE RESULTAT (1 onglet par entreprise, colonnes N et N-1) ==="
     },
     {
       "field_id": "bilan_societe_nom",
       "label": "Nom de la société du bilan",
-      "question": "Quel est le nom de la société dont ce document présente le bilan ou les comptes annuels ? Cherche la désignation de l'entreprise, la dénomination sociale ou la raison sociale affichée sur la page de garde ou en haut des états financiers. Retourne le nom complet avec la forme juridique si elle est visible.",
+      "question": "Quel est le nom complet (avec forme juridique) de la société présentée dans ce document ? Cherche : dénomination sociale, raison sociale, désignation de l'entreprise.",
       "excel_cell": null,
       "excel_sheet": "{company_name}",
       "type": "string",
       "format_hint": "Nom complet (ex: SAS SIGNATURE)",
       "context_hint": "Ce nom sert de titre d'onglet pour les états financiers de la société.",
       "source_doc_name_variants": [
-        "bilan",
-        "comptes annuels",
-        "etats financiers",
-        "liasse fiscale",
-        "2033",
-        "2051",
-        "2052",
-        "2053"
+        "bilan", "comptes annuels", "etats financiers", "liasse fiscale",
+        "2033", "2051", "2052", "2053"
       ],
       "source_dirs": [
         "*Audit/*Opérateur/*Eléments financiers/*Etats Financiers",
@@ -38,34 +29,22 @@
         "*Audit/*Opérateur/*Eléments financiers/*Comptes Annuels"
       ],
       "hint_keywords": [
-        "bilan",
-        "comptes annuels",
-        "etats financiers",
-        "liasse",
-        "2033",
-        "2051",
-        "2052",
-        "2053"
+        "bilan", "comptes annuels", "etats financiers", "liasse",
+        "2033", "2051", "2052", "2053"
       ]
     },
     {
       "field_id": "bilan_date_arrete_n",
       "label": "Date d'arrêté des comptes (exercice N)",
-      "question": "Quelle est la date de clôture de l'EXERCICE LE PLUS RÉCENT présenté dans ce document ? Cherche dans les en-têtes de colonnes du bilan (ex: 'Net au 31/12/2023', 'Au 31/12/2024', 'Du 01/01/2024 au 31/12/2024') ou dans la page de garde ('Période du ... au ...'). La date N est la PLUS RÉCENTE. ATTENTION : si le document dit 'Période du 01/01/2023 au 31/12/2023', alors N = 31/12/2023 (pas 31/12/2022). Ne confonds pas la date de la colonne N-1 avec celle de N.",
+      "question": "Quelle est la date de clôture de l'exercice le PLUS RÉCENT ? Cherche dans les en-têtes du bilan (ex: 'Net au 31/12/2023') ou la page de garde ('Période du ... au ...'). N est la date la plus récente.",
       "excel_cell": null,
       "excel_sheet": "{company_name}",
       "type": "string",
       "format_hint": "format JJ/MM/AAAA",
       "context_hint": "C'est la date de l'exercice courant, la plus récente.",
       "source_doc_name_variants": [
-        "bilan",
-        "comptes annuels",
-        "etats financiers",
-        "liasse fiscale",
-        "2033",
-        "2051",
-        "2052",
-        "2053"
+        "bilan", "comptes annuels", "etats financiers", "liasse fiscale",
+        "2033", "2051", "2052", "2053"
       ],
       "source_dirs": [
         "*Audit/*Opérateur/*Eléments financiers/*Etats Financiers",
@@ -74,30 +53,21 @@
         "*Audit/*Opérateur/*Eléments financiers/*Comptes Annuels"
       ],
       "hint_keywords": [
-        "bilan",
-        "comptes annuels",
-        "etats financiers",
-        "liasse"
+        "bilan", "comptes annuels", "etats financiers", "liasse"
       ]
     },
     {
       "field_id": "bilan_date_arrete_n1",
       "label": "Date d'arrêté des comptes (exercice N-1)",
-      "question": "Quelle est la date de clôture de l'EXERCICE PRÉCÉDENT (N-1) présenté dans ce document ? C'est la deuxième date la plus récente visible dans les en-têtes de colonnes du bilan (ex: si N = 31/12/2023, alors N-1 = 31/12/2022). Si le document ne présente qu'un seul exercice (premier exercice), retourne null.",
+      "question": "Quelle est la date de clôture de l'exercice PRÉCÉDENT (N-1) ? C'est la 2e date la plus récente dans les en-têtes. Si un seul exercice est présenté, retourne null.",
       "excel_cell": null,
       "excel_sheet": "{company_name}",
       "type": "string",
       "format_hint": "format JJ/MM/AAAA ou null",
-      "context_hint": "C'est la date de l'exercice précédent, pas celle de l'exercice courant.",
+      "context_hint": "C'est la date de l'exercice précédent.",
       "source_doc_name_variants": [
-        "bilan",
-        "comptes annuels",
-        "etats financiers",
-        "liasse fiscale",
-        "2033",
-        "2051",
-        "2052",
-        "2053"
+        "bilan", "comptes annuels", "etats financiers", "liasse fiscale",
+        "2033", "2051", "2052", "2053"
       ],
       "source_dirs": [
         "*Audit/*Opérateur/*Eléments financiers/*Etats Financiers",
@@ -106,31 +76,24 @@
         "*Audit/*Opérateur/*Eléments financiers/*Comptes Annuels"
       ],
       "hint_keywords": [
-        "bilan",
-        "comptes annuels",
-        "etats financiers",
-        "liasse"
+        "bilan", "comptes annuels", "etats financiers", "liasse"
       ]
     },
     {
-      "_comment": "--- TABLEAU ACTIF : lignes natives puis calcul Python ---"
+      "_comment": "--- TABLEAU ACTIF ---"
     },
     {
       "field_id": "bilan_actif_table",
       "label": "Tableau bilan actif natif",
-      "question": "ÉTAPE 1 — Identifie la structure du tableau bilan actif : repère les en-têtes de colonnes (Brut, Amortissements, Net au JJ/MM/AAAA, etc.). La colonne N est celle avec la date la plus récente. Utilise TOUJOURS les valeurs NETTES (jamais brut). ÉTAPE 2 — Extrais un array JSON de 12 objets dans cet ordre strict : immobilisations_corporelles, immobilisations_financieres, stocks, creances, creances_clients, autres_creances, tresorerie, disponibilites, vmp, charges_constatees_avance, autres_actif_residuel, total_actif. Chaque objet a les clés : key, poste, n, n1, commentaires. RÈGLES PAR POSTE : immobilisations_corporelles = SOMME NETTE de toutes les immo corporelles (terrains + constructions + installations + autres immo corp). Si un sous-total 'total immobilisations corporelles' existe, utilise-le. NE PRENDS PAS une seule sous-ligne ; immobilisations_financieres = SOMME NETTE de toutes les immo financières (participations + autres titres + prêts + autres immo fin) ; stocks = total stocks et en-cours (marchandises + en-cours + matières premières) ; creances = total de la section créances s'il est explicitement affiché, sinon null ; creances_clients = clients et comptes rattachés ; autres_creances = autres créances (incluant personnel, état, fournisseurs débiteurs si présents) ; tresorerie = total trésorerie s'il est explicitement affiché, sinon null ; disponibilites = disponibilités ; vmp = valeurs mobilières de placement ; charges_constatees_avance = charges constatées d'avance ; autres_actif_residuel = avances/acomptes versés + capital souscrit non appelé + tout reliquat non classé ailleurs ; total_actif = TOTAL ACTIF tel qu'affiché dans le document. VÉRIFICATION : la somme immobilisations_corporelles + immobilisations_financieres + stocks + creances_clients + autres_creances + disponibilites + vmp + charges_constatees_avance + autres_actif_residuel doit être proche du total_actif. Si l'écart dépasse 5%, relis le tableau. Retourne 0 si un poste existe mais est vide, null si le poste n'est pas identifiable. Retourne uniquement l'array JSON.",
+      "question": "Extrais TOUTES les lignes visibles dans le TABLEAU PRINCIPAL de BILAN ACTIF de ce document, celui présenté en général au début des états financiers.\n\nIgnore les annexes, notes, tableaux détaillés, tableaux de variation ou toute reprise plus loin dans le document. S'il y a plusieurs occurrences, prends le premier tableau principal d'actif complet.\n\nPour chaque ligne du tableau qui contient AU MOINS UN MONTANT lisible en N ou en N-1, retourne un objet : {\"poste\": \"libellé exact\", \"n\": valeur, \"n1\": valeur}\n\nRègles :\n- N = exercice le plus récent, N-1 = exercice précédent\n- Utilise les colonnes NET (pas Brut)\n- Inclus les sous-totaux de section ET le TOTAL ACTIF s'ils affichent un montant\n- N'ignore PAS une ligne juste parce que tu ne sais pas à quel agrégat comptable elle correspond\n- N'inclus pas les lignes purement textuelles ou sans chiffre\n- Retourne 0 seulement si 0 est explicitement affiché\n- Retourne null si la cellule est vide, illisible, ou si la colonne N-1 n'existe pas\n- Recopie les libellés TELS QUELS depuis le document\n\nRetourne un array JSON.",
       "excel_cell": null,
       "excel_sheet": "{company_name}",
       "type": "table",
-      "format_hint": "Array JSON de 12 objets avec clés key, poste, n, n1, commentaires.",
-      "context_hint": "Le but est de récupérer des lignes comptables stables entre 2033-A et 2051. Les agrégats Excel seront ensuite recalculés en Python à partir de ces lignes natives.",
+      "format_hint": "Array JSON de objets {poste, n, n1}.",
+      "context_hint": "Le LLM recopie les lignes brutes. Le mapping comptable est fait en Python.",
       "source_doc_name_variants": [
-        "bilan",
-        "comptes annuels",
-        "etats financiers",
-        "liasse fiscale",
-        "2033",
-        "2051"
+        "bilan", "comptes annuels", "etats financiers", "liasse fiscale",
+        "2033", "2051"
       ],
       "source_dirs": [
         "*Audit/*Opérateur/*Eléments financiers/*Etats Financiers",
@@ -139,35 +102,26 @@
         "*Audit/*Opérateur/*Eléments financiers/*Comptes Annuels"
       ],
       "hint_keywords": [
-        "actif",
-        "bilan",
-        "2033",
-        "2051",
-        "liasse",
-        "immobilisations",
-        "creances",
-        "disponibilites"
+        "actif", "immobilisations", "creances", "disponibilites",
+        "bilan", "comptes annuels", "etats financiers", "liasse",
+        "2033", "2051"
       ]
     },
     {
-      "_comment": "--- TABLEAU PASSIF : lignes natives puis calcul Python ---"
+      "_comment": "--- TABLEAU PASSIF ---"
     },
     {
       "field_id": "bilan_passif_table",
       "label": "Tableau bilan passif natif",
-      "question": "ÉTAPE 1 — Identifie la structure du tableau bilan passif : repère les en-têtes de colonnes. La colonne N est celle avec la date de clôture la plus récente. Le passif n'a généralement que des colonnes Net (pas de Brut/Amort). ÉTAPE 2 — Extrais un array JSON de 15 objets dans cet ordre strict : capital_social, resultat_exercice, capitaux_propres, dettes_financieres, dettes_bancaires, autres_dettes_financieres, dettes_exploitation, fournisseurs, dettes_fiscales_sociales, dettes_diverses, provisions_pour_risques, provisions_pour_charges, produits_constates_avance, autres_passif_residuel, total_passif. Chaque objet a les clés : key, poste, n, n1, commentaires. RÈGLES PAR POSTE : capital_social = capital social ou individuel ; resultat_exercice = résultat de l'exercice (bénéfice ou perte) ; capitaux_propres = TOTAL CAPITAUX PROPRES affiché (incluant capital + réserves + report à nouveau + résultat + subventions + provisions réglementées) ; dettes_financieres = total dettes financières s'il est explicitement affiché, sinon null ; dettes_bancaires = emprunts et dettes auprès des établissements de crédit uniquement ; autres_dettes_financieres = TOUT le reste des dettes financières hors banques : comptes courants d'associés (même libellés 'Associés' ou 'Financières diverses - Associés') + emprunts obligataires + autres dettes financières diverses ; dettes_exploitation = total dettes d'exploitation s'il est explicitement affiché, sinon null ; fournisseurs = dettes fournisseurs et comptes rattachés ; dettes_fiscales_sociales = dettes fiscales et sociales ; dettes_diverses = autres dettes (hors fournisseurs, fiscales, immo) ; provisions_pour_risques = provisions pour risques ; provisions_pour_charges = provisions pour charges ; produits_constates_avance = produits constatés d'avance ; autres_passif_residuel = reliquat non classé ailleurs (dettes sur immobilisations, etc.) ; total_passif = TOTAL PASSIF affiché. ATTENTION au double comptage : dettes_bancaires et autres_dettes_financieres sont des SOUS-POSTES de dettes_financieres. Ne les additionne pas si dettes_financieres est déjà extrait. VÉRIFICATION : capitaux_propres + provisions + total des dettes + produits constatés d'avance doit être proche de total_passif. Retourne 0 si un poste existe mais est vide, null si non identifiable. Retourne uniquement l'array JSON.",
+      "question": "Extrais TOUTES les lignes visibles dans le TABLEAU PRINCIPAL de BILAN PASSIF de ce document, celui présenté en général au début des états financiers.\n\nIgnore les annexes, notes, tableaux détaillés, tableaux de variation ou toute reprise plus loin dans le document. S'il y a plusieurs occurrences, prends le premier tableau principal de passif complet.\n\nPour chaque ligne du tableau qui contient AU MOINS UN MONTANT lisible en N ou en N-1, retourne un objet : {\"poste\": \"libellé exact\", \"n\": valeur, \"n1\": valeur}\n\nRègles :\n- N = exercice le plus récent, N-1 = exercice précédent\n- Inclus les sous-totaux (capitaux propres, total dettes, etc.) ET le TOTAL PASSIF s'ils affichent un montant\n- N'ignore PAS une ligne juste parce que tu ne sais pas à quel agrégat comptable elle correspond\n- N'inclus pas les lignes purement textuelles ou sans chiffre\n- Retourne 0 seulement si 0 est explicitement affiché\n- Retourne null si la cellule est vide, illisible, ou si la colonne N-1 n'existe pas\n- Recopie les libellés TELS QUELS depuis le document\n\nRetourne un array JSON.",
       "excel_cell": null,
       "excel_sheet": "{company_name}",
       "type": "table",
-      "format_hint": "Array JSON de 16 objets avec clés key, poste, n, n1, commentaires.",
-      "context_hint": "Le but est de récupérer des lignes comptables stables entre 2033-A et 2052. Les agrégats Excel seront ensuite recalculés en Python à partir de ces lignes natives.",
+      "format_hint": "Array JSON de objets {poste, n, n1}.",
+      "context_hint": "Le LLM recopie les lignes brutes. Le mapping comptable est fait en Python.",
       "source_doc_name_variants": [
-        "bilan",
-        "comptes annuels",
-        "etats financiers",
-        "liasse fiscale",
-        "2033",
-        "2052"
+        "bilan", "comptes annuels", "etats financiers", "liasse fiscale",
+        "2033", "2052"
       ],
       "source_dirs": [
         "*Audit/*Opérateur/*Eléments financiers/*Etats Financiers",
@@ -176,36 +130,26 @@
         "*Audit/*Opérateur/*Eléments financiers/*Comptes Annuels"
       ],
       "hint_keywords": [
-        "passif",
-        "bilan",
-        "2033",
-        "2052",
-        "liasse",
-        "capitaux propres",
-        "dettes",
-        "fournisseurs"
+        "passif", "capitaux propres", "dettes", "fournisseurs",
+        "bilan", "comptes annuels", "etats financiers", "liasse",
+        "2033", "2052"
       ]
     },
     {
-      "_comment": "--- TABLEAU COMPTE DE RESULTAT : lignes natives puis calcul Python ---"
+      "_comment": "--- TABLEAU COMPTE DE RESULTAT ---"
     },
     {
       "field_id": "bilan_compte_resultat_table",
       "label": "Tableau compte de résultat natif",
-      "question": "ÉTAPE 1 — Identifie la structure du compte de résultat : repère les en-têtes de colonnes. La colonne N est celle avec la période la plus récente (ex: 'du 01/01/2023 au 31/12/2023'). Certains CDR ont des colonnes France/Exportation/Total : utilise la colonne Total. ÉTAPE 2 — Extrais un array JSON de 24 objets dans cet ordre strict : chiffre_affaires, charges, achats_marchandises, variation_stock_marchandises, achats_matieres_premieres, variation_stock_matieres_premieres, autres_charges_externes, salaires_charges_sociales, salaires, charges_sociales, impots_taxes, dotations, dotations_amortissements, dotations_provisions, autres_elements, production_stockee, subventions_exploitation, reprises_exploitation, autres_produits_exploitation, autres_charges_exploitation, resultat_exploitation, resultat_financier, resultat_exceptionnel, impots_sur_les_societes. Chaque objet a les clés : key, poste, n, n1, commentaires. RÈGLES PAR POSTE : chiffre_affaires = montant net du chiffre d'affaires (ventes marchandises + production vendue) ; charges = total charges d'exploitation s'il est affiché, sinon null ; achats_marchandises = achats de marchandises ; variation_stock_marchandises = variation de stock marchandises ; achats_matieres_premieres = achats matières premières et approvisionnements ; variation_stock_matieres_premieres = variation de stock matières premières ; autres_charges_externes = autres achats et charges externes ; salaires_charges_sociales = total salaires + charges sociales s'il est affiché, sinon null ; salaires = salaires et traitements ; charges_sociales = charges sociales du personnel ; impots_taxes = impôts, taxes et versements assimilés ; dotations = total dotations d'exploitation s'il est affiché, sinon null ; dotations_amortissements = dotations aux amortissements sur immobilisations ; dotations_provisions = dotations aux provisions ; autres_elements = null sauf si un solde 'autres charges - autres produits' est affiché ; production_stockee = production stockée ; subventions_exploitation = subventions d'exploitation ; reprises_exploitation = reprises sur amortissements/provisions et transferts de charges ; autres_produits_exploitation = autres produits d'exploitation ; autres_charges_exploitation = autres charges d'exploitation ; resultat_exploitation = RÉSULTAT D'EXPLOITATION tel qu'affiché ; resultat_financier = résultat financier (produits financiers - charges financières) ; resultat_exceptionnel = résultat exceptionnel (produits except. - charges except.) ; impots_sur_les_societes = impôts sur les bénéfices. ATTENTION au signe : les charges sont en valeur POSITIVE (sauf variation de stock qui peut être négative). Le résultat financier et exceptionnel peuvent être négatifs. Retourne 0 si un poste existe mais est vide, null si non identifiable. Retourne uniquement l'array JSON.",
+      "question": "Extrais TOUTES les lignes visibles dans le TABLEAU PRINCIPAL du COMPTE DE RÉSULTAT de ce document, celui présenté en général au début des états financiers.\n\nIgnore les annexes, notes, SIG, tableaux détaillés ou toute reprise plus loin dans le document. S'il y a plusieurs occurrences, prends le premier compte de résultat principal complet.\n\nPour chaque ligne du tableau qui contient AU MOINS UN MONTANT lisible en N ou en N-1, retourne un objet : {\"poste\": \"libellé exact\", \"n\": valeur, \"n1\": valeur}\n\nRègles :\n- N = période la plus récente. Si colonnes France/Export/Total, utilise Total.\n- Inclus les sous-totaux (total charges, résultat d'exploitation, etc.) s'ils affichent un montant\n- Les charges sont en valeur POSITIVE. Les résultats peuvent être négatifs.\n- N'ignore PAS une ligne juste parce que tu ne sais pas à quel agrégat comptable elle correspond\n- N'inclus pas les lignes purement textuelles ou sans chiffre\n- Retourne 0 seulement si 0 est explicitement affiché\n- Retourne null si la cellule est vide, illisible, ou si la colonne N-1 n'existe pas\n- Recopie les libellés TELS QUELS depuis le document\n\nRetourne un array JSON.",
       "excel_cell": null,
       "excel_sheet": "{company_name}",
       "type": "table",
-      "format_hint": "Array JSON de 24 objets avec clés key, poste, n, n1, commentaires.",
-      "context_hint": "Le but est de récupérer des lignes comptables stables entre 2033-B et 2053. Les agrégats Excel seront ensuite recalculés en Python à partir de ces lignes natives et contrôlés contre le résultat d'exploitation source.",
+      "format_hint": "Array JSON de objets {poste, n, n1}.",
+      "context_hint": "Le LLM recopie les lignes brutes. Le mapping comptable est fait en Python.",
       "source_doc_name_variants": [
-        "bilan",
-        "comptes annuels",
-        "etats financiers",
-        "liasse fiscale",
-        "2033",
-        "2053",
-        "compte de résultat"
+        "bilan", "comptes annuels", "etats financiers", "liasse fiscale",
+        "2033", "2053", "compte de résultat"
       ],
       "source_dirs": [
         "*Audit/*Opérateur/*Eléments financiers/*Etats Financiers",
@@ -214,17 +158,10 @@
         "*Audit/*Opérateur/*Eléments financiers/*Comptes Annuels"
       ],
       "hint_keywords": [
-        "compte de résultat",
-        "resultat",
-        "bilan",
-        "etats financiers",
-        "comptes annuels",
-        "2033",
-        "2053",
-        "liasse",
-        "charges",
-        "produits",
-        "exploitation"
+        "compte de resultat", "resultat exploitation",
+        "charges", "produits", "chiffre d affaires",
+        "bilan", "liasse", "comptes annuels", "etats financiers",
+        "2033", "2053"
       ]
     }
   ]

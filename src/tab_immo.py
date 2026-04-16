@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import calendar
 import math
+import re
+import time
+import unicodedata
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Dict, List, Literal, Optional
@@ -19,6 +23,13 @@ DVF_API_BASE_URL = "https://apidf-preprod.cerema.fr"
 DVF_API_TOKEN = None
 DEFAULT_TIMEOUT_SECONDS = 20
 USER_AGENT = "comparateur-immo-streamlit/0.1"
+DEFAULT_RETRY_COUNT = 3
+DEFAULT_BACKOFF_SECONDS = 0.8
+MAX_RETAINED_COMPARABLES = 10
+DVF_MONTH_WINDOW = 20
+DVF_PAGE_SIZE = 100
+DEFAULT_SEARCH_BBOX_DELTA = 0.002
+DEFAULT_SEARCH_RADIUS_M = int(round(DEFAULT_SEARCH_BBOX_DELTA * 111320))
 
 
 # -----------------------------------------------------------------------------
@@ -34,7 +45,8 @@ class ComparableRequest(BaseModel):
     living_area_sqm: float = Field(..., gt=0)
     rooms: int = Field(..., ge=1, le=20)
     land_area_sqm: Optional[float] = Field(None, ge=0)
-    valuation_date: Optional[date] = None
+    search_radius_m: int = Field(DEFAULT_SEARCH_RADIUS_M, ge=50, le=2000)
+    api_min_year: Optional[int] = Field(None, ge=2000, le=2100)
 
     @field_validator("land_area_sqm")
     @classmethod
@@ -42,6 +54,19 @@ class ComparableRequest(BaseModel):
         if value is None:
             return None
         return round(float(value), 2)
+
+    @field_validator("api_min_year")
+    @classmethod
+    def validate_api_min_year(cls, value: Optional[int]) -> Optional[int]:
+        if value is None:
+            return None
+        minimum_year = 2000
+        maximum_year = subtract_months(date.today(), DVF_MONTH_WINDOW).year
+        if value < minimum_year or value > maximum_year:
+            raise ValueError(
+                f"L'année min API doit être comprise entre {minimum_year} et {maximum_year}"
+            )
+        return value
 
 
 class SubjectProperty(BaseModel):
@@ -95,6 +120,20 @@ def median(values: List[float]) -> Optional[float]:
 
 
 
+def format_french_number(value: Any) -> Any:
+    if value is None or isinstance(value, bool) or not isinstance(value, (int, float)):
+        return value
+    rounded = round(float(value), 2)
+    if math.isclose(rounded, round(rounded), abs_tol=1e-9):
+        return f"{int(round(rounded)):,}".replace(",", " ")
+    text = f"{rounded:,.2f}".replace(",", " ").replace(".", ",")
+    if text.endswith("0"):
+        text = text[:-1]
+    if text.endswith(",0"):
+        text = text[:-2]
+    return text
+
+
 def try_parse_date(value: Any) -> Optional[date]:
     if value is None or value == "":
         return None
@@ -108,6 +147,50 @@ def try_parse_date(value: Any) -> Optional[date]:
             continue
     return None
 
+
+def subtract_months(value: date, months: int) -> date:
+    year_delta, month_index = divmod(value.month - 1 - months, 12)
+    target_year = value.year + year_delta
+    target_month = month_index + 1
+    target_day = min(value.day, calendar.monthrange(target_year, target_month)[1])
+    return date(target_year, target_month, target_day)
+
+
+def http_get_json(
+    url: str,
+    *,
+    params: Optional[Dict[str, Any]] = None,
+    headers: Optional[Dict[str, str]] = None,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
+    retries: int = DEFAULT_RETRY_COUNT,
+    backoff_seconds: float = DEFAULT_BACKOFF_SECONDS,
+) -> Any:
+    last_exception: Optional[Exception] = None
+
+    for attempt in range(retries + 1):
+        try:
+            response = requests.get(
+                url,
+                params=params,
+                headers=headers,
+                timeout=(10, timeout),
+            )
+            response.raise_for_status()
+            return response.json()
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
+            last_exception = exc
+            if attempt >= retries:
+                raise
+
+            # Exponential backoff to absorb temporary network glitches.
+            time.sleep(backoff_seconds * (2**attempt))
+
+    if last_exception:
+        raise last_exception
+
+    raise RuntimeError("Erreur réseau inattendue")
+
+
 def reverse_geocode(longitude: float, latitude: float) -> Dict[str, Any]:
     headers = {"User-Agent": USER_AGENT}
     params = {
@@ -115,14 +198,11 @@ def reverse_geocode(longitude: float, latitude: float) -> Dict[str, Any]:
         "lat": latitude,
     }
 
-    response = requests.get(
+    payload = http_get_json(
         "https://data.geopf.fr/geocodage/reverse",
         params=params,
         headers=headers,
-        timeout=DEFAULT_TIMEOUT_SECONDS,
     )
-    response.raise_for_status()
-    payload = response.json()
 
     features = payload.get("features", [])
     if not features:
@@ -150,14 +230,11 @@ class GeocoderClient:
     def geocode(self, address: str) -> Dict[str, Any]:
         params = {"q": address, "limit": 1}
         headers = {"User-Agent": USER_AGENT}
-        response = requests.get(
+        payload = http_get_json(
             self.base_url,
             params=params,
             headers=headers,
-            timeout=DEFAULT_TIMEOUT_SECONDS,
         )
-        response.raise_for_status()
-        payload = response.json()
 
         features = payload.get("features", [])
         if not features:
@@ -178,44 +255,102 @@ class GeocoderClient:
             "latitude": float(coordinates[1]),
         }
 
+
+def _normalize_address_text(value: str) -> str:
+    ascii_text = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
+    ascii_text = ascii_text.lower()
+    ascii_text = re.sub(r"[^a-z0-9]+", " ", ascii_text)
+    return " ".join(ascii_text.split())
+
+
+def _build_address_suggestion(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if "properties" in item:
+        props = item.get("properties", {})
+        coords = item.get("geometry", {}).get("coordinates", [])
+        longitude = coords[0] if len(coords) == 2 else None
+        latitude = coords[1] if len(coords) == 2 else None
+    else:
+        props = item
+        longitude = item.get("x") or item.get("lon") or item.get("longitude")
+        latitude = item.get("y") or item.get("lat") or item.get("latitude")
+
+    label = props.get("fulltext") or props.get("label") or props.get("name") or ""
+    if not label:
+        return None
+
+    return {
+        "label": label,
+        "city": props.get("city"),
+        "postcode": props.get("zipcode") or props.get("postcode"),
+        "street": props.get("street"),
+        "longitude": float(longitude) if longitude is not None else None,
+        "latitude": float(latitude) if latitude is not None else None,
+    }
+
+
 def get_address_suggestions(query: str, limit: int = 6) -> List[Dict[str, Any]]:
     if not query or len(query.strip()) < 3:
         return []
 
+    query = query.strip()
+    limit = max(1, min(limit, 15))
     headers = {"User-Agent": USER_AGENT}
     params = {
-        "text": query.strip(),
-        "limit": limit,
-        "index": "address",
+        "text": query,
+        "type": "StreetAddress",
+        "maximumResponses": limit,
     }
 
-    response = requests.get(
+    payload = http_get_json(
         "https://data.geopf.fr/geocodage/completion",
         params=params,
         headers=headers,
-        timeout=DEFAULT_TIMEOUT_SECONDS,
     )
-    response.raise_for_status()
-    payload = response.json()
 
-    features = payload.get("features", [])
+    raw_items = payload.get("results") or payload.get("features") or []
     suggestions: List[Dict[str, Any]] = []
+    seen_labels: set[str] = set()
 
-    for feature in features:
-        props = feature.get("properties", {})
-        coords = feature.get("geometry", {}).get("coordinates", [])
-        suggestions.append(
-            {
-                "label": props.get("fulltext") or props.get("label") or props.get("name") or "",
-                "city": props.get("city"),
-                "postcode": props.get("zipcode") or props.get("postcode"),
-                "street": props.get("street"),
-                "longitude": coords[0] if len(coords) == 2 else None,
-                "latitude": coords[1] if len(coords) == 2 else None,
-            }
-        )
+    for item in raw_items:
+        suggestion = _build_address_suggestion(item)
+        if not suggestion:
+            continue
 
-    return suggestions
+        normalized_label = _normalize_address_text(suggestion["label"])
+        if normalized_label in seen_labels:
+            continue
+
+        seen_labels.add(normalized_label)
+        suggestions.append(suggestion)
+
+    if suggestions:
+        return suggestions[:limit]
+
+    # Fallback: the search endpoint includes fuzzy autocomplete and returns GeoJSON.
+    fallback_payload = http_get_json(
+        GEOCODER_URL,
+        params={
+            "q": query,
+            "limit": limit,
+            "type": "StreetAddress",
+            "autocomplete": 1,
+        },
+        headers=headers,
+    )
+
+    for item in fallback_payload.get("features", []):
+        suggestion = _build_address_suggestion(item)
+        if not suggestion:
+            continue
+
+        normalized_label = _normalize_address_text(suggestion["label"])
+        if normalized_label in seen_labels:
+            continue
+
+        seen_labels.add(normalized_label)
+        suggestions.append(suggestion)
+
+    return suggestions[:limit]
 
 def _bbox_around(longitude: float, latitude: float, delta: float = 0.002) -> str:
     lon_min = longitude - delta
@@ -250,6 +385,8 @@ def _geometry_center(geometry: Dict[str, Any]) -> tuple[Optional[float], Optiona
             return sum(xs) / len(xs), sum(ys) / len(ys)
 
     return None, None
+
+
 class DVFClient:
     def __init__(self, base_url: str = DVF_API_BASE_URL, token: Optional[str] = DVF_API_TOKEN) -> None:
         self.base_url = base_url.rstrip("/")
@@ -265,22 +402,27 @@ class DVFClient:
         rooms: int,
         land_area_sqm: Optional[float],
         valuation_date: date,
+        search_radius_m: int = DEFAULT_SEARCH_RADIUS_M,
+        api_min_year: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         headers = {"Content-Type": "application/json"}
         if self.token:
             headers["Authorization"] = "Token " + self.token
 
+        window_start = subtract_months(valuation_date, DVF_MONTH_WINDOW)
+        effective_api_min_year = min(window_start.year, api_min_year or window_start.year)
+        bbox_delta = search_radius_m / 111320
         sbati_min = max(1, int(living_area_sqm * 0.30))
         sbati_max = int(living_area_sqm * 1.70)
 
         params: Dict[str, Any] = {
-            "in_bbox": _bbox_around(longitude, latitude),
-            "anneemut_min": str(max(2010, valuation_date.year - 4)),
+            "in_bbox": _bbox_around(longitude, latitude, delta=bbox_delta),
+            "anneemut_min": str(effective_api_min_year),
             "anneemut_max": str(valuation_date.year),
             "sbati_min": sbati_min,
             "sbati_max": sbati_max,
             "fields": "all",
-            "page_size": 30,
+            "page_size": DVF_PAGE_SIZE,
             "format": "json",
         }
 
@@ -288,25 +430,66 @@ class DVFClient:
             params["sterr_min"] = max(0, int(land_area_sqm * 0.30))
             params["sterr_max"] = int(land_area_sqm * 2.00)
 
-        response = requests.get(
-            f"{self.base_url}/dvf_opendata/geomutations/",
-            params=params,
-            headers=headers,
-            timeout=DEFAULT_TIMEOUT_SECONDS,
+        records: List[Dict[str, Any]] = []
+        expected_count: Optional[int] = None
+        page = 1
+
+        while True:
+            payload = http_get_json(
+                f"{self.base_url}/dvf_opendata/geomutations/",
+                params={**params, "page": page},
+                headers=headers,
+                timeout=40,
+            )
+
+            page_records: List[Dict[str, Any]] = []
+            has_next_page = False
+            if isinstance(payload, dict):
+                if "features" in payload and isinstance(payload["features"], list):
+                    page_records = payload["features"]
+                elif "results" in payload and isinstance(payload["results"], list):
+                    page_records = payload["results"]
+
+                count = payload.get("count")
+                if isinstance(count, int):
+                    expected_count = count
+                has_next_page = bool(payload.get("next"))
+            elif isinstance(payload, list):
+                page_records = payload
+
+            if not page_records:
+                break
+
+            records.extend(page_records)
+
+            if expected_count is not None and len(records) >= expected_count:
+                break
+            if has_next_page or (expected_count is not None and len(records) < expected_count):
+                page += 1
+                continue
+            if len(page_records) < DVF_PAGE_SIZE:
+                break
+
+            page += 1
+
+        filtered_records: List[Dict[str, Any]] = []
+        for record in records:
+            props = record.get("properties", record)
+            sale_date = try_parse_date(props.get("datemut") or props.get("date_mutation"))
+            if sale_date is None:
+                continue
+            if window_start <= sale_date <= valuation_date:
+                filtered_records.append(record)
+
+        filtered_records.sort(
+            key=lambda item: try_parse_date(
+                (item.get("properties", item)).get("datemut")
+                or (item.get("properties", item)).get("date_mutation")
+            )
+            or date.min,
+            reverse=True,
         )
-        response.raise_for_status()
-        payload = response.json()
-
-        if isinstance(payload, dict):
-            if "features" in payload and isinstance(payload["features"], list):
-                return payload["features"]
-            if "results" in payload and isinstance(payload["results"], list):
-                return payload["results"]
-
-        if isinstance(payload, list):
-            return payload
-
-        return []
+        return filtered_records
 
 # -----------------------------------------------------------------------------
 # Scoring
@@ -330,12 +513,17 @@ SCORING = ScoringConfig()
 
 
 class ComparableScorer:
-    def score(self, subject: SubjectProperty, comp: Dict[str, Any]) -> float:
+    def score(
+        self,
+        subject: SubjectProperty,
+        comp: Dict[str, Any],
+        reference_date: Optional[date] = None,
+    ) -> float:
         score = 0.0
         score += self._score_location(subject, comp)
         score += self._score_rooms(subject, comp)
         score += self._score_surface(subject, comp)
-        score += self._score_freshness(comp)
+        score += self._score_freshness(comp, reference_date=reference_date)
 
         if subject.property_type == "maison":
             score += self._score_land(subject, comp)
@@ -424,11 +612,18 @@ class ComparableScorer:
             return 3
         return 0
 
-    def _score_freshness(self, comp: Dict[str, Any]) -> float:
+    def _score_freshness(
+        self,
+        comp: Dict[str, Any],
+        reference_date: Optional[date] = None,
+    ) -> float:
         sale_date = comp.get("sale_or_listing_date")
         if sale_date is None:
             return 0
-        days = (date.today() - sale_date).days
+        anchor_date = reference_date or date.today()
+        days = (anchor_date - sale_date).days
+        if days < 0:
+            return 0
         if days <= 183:
             return 10
         if days <= 365:
@@ -469,7 +664,7 @@ class ComparablePipeline:
         self.scorer = scorer
 
     def run(self, payload: ComparableRequest) -> Dict[str, Any]:
-        valuation_date = payload.valuation_date or date.today()
+        valuation_date = date.today()
         geo = self.geocoder.geocode(payload.address)
 
         subject = SubjectProperty(
@@ -492,6 +687,8 @@ class ComparablePipeline:
             rooms=subject.rooms,
             land_area_sqm=subject.land_area_sqm,
             valuation_date=valuation_date,
+            search_radius_m=payload.search_radius_m,
+            api_min_year=payload.api_min_year,
         )
 
         comparables: List[Dict[str, Any]] = []
@@ -499,16 +696,43 @@ class ComparablePipeline:
             comp = self._normalize_record(raw, subject)
             if comp is None:
                 continue
-            comp["similarity_score"] = self.scorer.score(subject, comp)
-            comp["retained"] = comp["similarity_score"] >= 40
+            comp["similarity_score"] = self.scorer.score(
+                subject,
+                comp,
+                reference_date=valuation_date,
+            )
+            comp["retained"] = len(comparables) < MAX_RETAINED_COMPARABLES
             comparables.append(comp)
 
-        comparables.sort(key=lambda item: item["similarity_score"], reverse=True)
-        retained_prices = [c["price_per_sqm_eur"] for c in comparables if c["retained"] and c.get("price_per_sqm_eur") is not None]
+        retained_prices = [
+            c["Prix par m²"]
+            for c in comparables
+            if c["retained"] and c.get("Prix par m²") is not None
+        ]
+        returned_comparables = []
+        for comp in comparables:
+            returned_comp = {}
+            for key, value in comp.items():
+                if key in {
+                    "source",
+                    "source_record_id",
+                    "city",
+                    "latitude",
+                    "longitude",
+                    "postcode",
+                    "street_name",
+                    "Type propriété",
+                }:
+                    continue
+                if key in {"Prix de vente", "Prix par m²", "distance", "living_area_sqm", "land_area_sqm","terrain extérieur", "Surface habitable"}:
+                    returned_comp[key] = format_french_number(value)
+                else:
+                    returned_comp[key] = value
+            returned_comparables.append(returned_comp)
 
         return {
             "subject": subject.model_dump(),
-            "comparables": comparables,
+            "comparables": returned_comparables,
             "statistics": {
                 "comparables_found": len(comparables),
                 "comparables_retained": sum(1 for c in comparables if c["retained"]),
@@ -530,7 +754,13 @@ class ComparablePipeline:
         total_price = self._to_float(props.get("valeurfonc") or props.get("valeur_fonciere"))
         sale_date = try_parse_date(props.get("datemut") or props.get("date_mutation"))
 
-        if living_area is None or living_area <= 0 or total_price is None or total_price <= 0:
+        if (
+            living_area is None
+            or living_area <= 0
+            or total_price is None
+            or total_price <= 0
+            or sale_date is None
+        ):
             return None
 
         area_gap = percent_gap(subject.living_area_sqm, living_area)
@@ -562,20 +792,21 @@ class ComparablePipeline:
         return {
             "source": "DVF+",
             "source_record_id": str(props.get("idmutation") or props.get("idmutinvar") or ""),
-            "comparable_address": comparable_address or None,
+            "Adresse": comparable_address or None,
             "street_name": reverse.get("street") or props.get("l_nomv"),
             "city": reverse.get("city"),
             "postcode": reverse.get("postcode"),
             "latitude": latitude,
             "longitude": longitude,
-            "property_type": property_type,
-            "living_area_sqm": round(living_area, 2),
-            "rooms": None,
-            "land_area_sqm": round(land_area, 2) if land_area is not None else None,
-            "sale_or_listing_date": sale_date,
-            "total_price_eur": round(total_price, 2),
-            "price_per_sqm_eur": round(total_price / living_area, 2),
-            "distance_m": None,
+            "Type propriété": property_type,
+            "Type de bien": props.get("libtypbien") or props.get("type_local"),
+            "Surface habitable": round(living_area, 2),
+            "Pièces": self._extract_rooms(props, property_type),
+            "Terrain extérieur": round(land_area, 2) if land_area is not None else None,
+            "Date de vente": sale_date,
+            "Prix de vente": round(total_price, 2),
+            "Prix par m²": round(total_price / living_area, 2),
+            "distance": None,
             "raw": raw,
         }
 
@@ -585,6 +816,18 @@ class ComparablePipeline:
         if "appartement" in value:
             return "appartement"
         if "maison" in value:
+            return "maison"
+        apartment_count = ComparablePipeline._to_int(raw.get("nblocapt")) or 0
+        house_count = ComparablePipeline._to_int(raw.get("nblocmai")) or 0
+        apartment_area = ComparablePipeline._to_float(raw.get("sbatapt")) or 0
+        house_area = ComparablePipeline._to_float(raw.get("sbatmai")) or 0
+        if apartment_count > 0 and house_count == 0:
+            return "appartement"
+        if house_count > 0 and apartment_count == 0:
+            return "maison"
+        if apartment_area > 0 and house_area <= 0:
+            return "appartement"
+        if house_area > 0 and apartment_area <= 0:
             return "maison"
         return None
 
@@ -605,6 +848,37 @@ class ComparablePipeline:
             return int(float(str(value).replace(",", ".")))
         except ValueError:
             return None
+
+    @classmethod
+    def _extract_rooms(cls, raw: Dict[str, Any], property_type: Optional[str]) -> Optional[int]:
+        for field_name in (
+            "nbpprinc",
+            "nombre_pieces_principales",
+            "nombre_pieces",
+            "nbpieces",
+            "pieces",
+        ):
+            rooms = cls._to_int(raw.get(field_name))
+            if rooms is not None and rooms > 0:
+                return rooms
+
+        if property_type not in {"appartement", "maison"}:
+            return None
+
+        prefix = "nbapt" if property_type == "appartement" else "nbmai"
+        room_counts = {
+            room_count: cls._to_int(raw.get(f"{prefix}{room_count}pp")) or 0
+            for room_count in range(1, 6)
+        }
+        if sum(room_counts.values()) != 1:
+            return None
+
+        for room_count, unit_count in room_counts.items():
+            if unit_count == 1:
+                return room_count
+        return None
+
+
 def render_real_estate_tab():
     st.markdown("""
     <div class="step-card">
@@ -632,10 +906,12 @@ def render_real_estate_tab():
         selected_label = st.selectbox(
             "Suggestions d'adresses",
             options,
-            index=0,
+            index=None,
+            placeholder="Choisis une suggestion si besoin",
             key="immo_address_selected",
         )
-        selected_address = selected_label
+        if selected_label:
+            selected_address = selected_label
     elif address_query:
         st.caption("Aucune suggestion trouvée. Tu peux quand même lancer la recherche avec l'adresse saisie.")
 
@@ -650,7 +926,7 @@ def render_real_estate_tab():
         living_area_sqm = st.number_input(
             "Surface habitable (m²)",
             min_value=1.0,
-            value=90.0,
+            value=80.0,
             step=1.0,
             key="immo_surface",
         )
@@ -659,7 +935,7 @@ def render_real_estate_tab():
             "Nombre de pièces",
             min_value=1,
             max_value=20,
-            value=5,
+            value=4,
             step=1,
             key="immo_rooms",
         )
@@ -669,7 +945,7 @@ def render_real_estate_tab():
         land_area_sqm = st.number_input(
             "Surface terrain (m²)",
             min_value=0.0,
-            value=300.0,
+            value=100.0,
             step=10.0,
             key="immo_land_area",
         )
@@ -679,6 +955,34 @@ def render_real_estate_tab():
         <h3><span class="step-number">2</span> Recherche</h3>
     </div>
     """, unsafe_allow_html=True)
+
+    current_date = date.today()
+    auto_api_min_year = subtract_months(current_date, DVF_MONTH_WINDOW).year
+    current_api_min_year = st.session_state.get("immo_api_min_year", auto_api_min_year)
+    st.session_state["immo_api_min_year"] = max(
+        2000,
+        min(int(current_api_min_year), auto_api_min_year),
+    )
+
+    col1, col2 = st.columns(2)
+    with col1:
+        search_radius_m = st.number_input(
+            "Rayon de recherche (~m)",
+            min_value=50,
+            max_value=2000,
+            value=DEFAULT_SEARCH_RADIUS_M,
+            step=25,
+            key="immo_search_radius_m",
+        )
+    with col2:
+        api_min_year = st.number_input(
+            "Année min API",
+            min_value=2000,
+            max_value=auto_api_min_year,
+            value=st.session_state["immo_api_min_year"],
+            step=1,
+            key="immo_api_min_year",
+        )
 
     launch = st.button(
         "Lancer comparatif",
@@ -706,6 +1010,8 @@ def render_real_estate_tab():
             living_area_sqm=living_area_sqm,
             rooms=rooms,
             land_area_sqm=land_area_sqm,
+            search_radius_m=search_radius_m,
+            api_min_year=api_min_year,
         )
 
         pipeline = ComparablePipeline(
@@ -719,6 +1025,16 @@ def render_real_estate_tab():
 
     except ValidationError as exc:
         st.error(f"Données invalides : {exc}")
+        return
+    except requests.exceptions.Timeout:
+        st.error(
+            "Le service immobilier a mis trop de temps à répondre. "
+            "La requête a été relancée automatiquement, mais a fini en timeout. "
+            "Réessaie dans quelques instants."
+        )
+        return
+    except requests.exceptions.RequestException as exc:
+        st.error(f"Erreur réseau vers les services immobiliers : {exc}")
         return
     except Exception as exc:
         st.error(f"Erreur : {exc}")
