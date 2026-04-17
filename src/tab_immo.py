@@ -27,7 +27,7 @@ from immo_scoring import (
 GEOCODER_URL = "https://data.geopf.fr/geocodage/search"
 DVF_API_BASE_URL = "https://apidf-preprod.cerema.fr"
 DVF_API_TOKEN = None
-DEFAULT_TIMEOUT_SECONDS = 20
+DEFAULT_TIMEOUT_SECONDS = 30
 USER_AGENT = "comparateur-immo-streamlit/0.1"
 DEFAULT_RETRY_COUNT = 3
 DEFAULT_BACKOFF_SECONDS = 0.8
@@ -537,7 +537,7 @@ class DVFClient:
                 f"{self.base_url}/dvf_opendata/geomutations/",
                 params={**params, "page": page},
                 headers=headers,
-                timeout=40,
+                timeout=60,
             )
 
             page_records: List[Dict[str, Any]] = []
