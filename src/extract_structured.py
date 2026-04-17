@@ -49,7 +49,7 @@ from financial_mapping import (
 from financial_tables_native import extract_financial_data, render_financial_context
 from llm_client import get_llm_client
 from normalization import canonical_name, extract_person_folder
-from question_config import load_questions_config
+from question_config import filter_fields_for_excel_tabs, load_questions_config
 from runtime_config import configure_environment
 
 ROOT_DIR = _SRC_DIR.parent.resolve()
@@ -86,7 +86,9 @@ def run(
     project_id: str,
     include_operateur: bool = True,
     include_patrimoine: bool = True,
-    include_financiers: bool = True,
+    include_bilan: bool = True,
+    include_compte_resultat: bool = True,
+    include_financiers: Optional[bool] = None,
 ):
     project_dir = OUTPUT_DIR / project_id
     manifest_path = project_dir / "manifest.json"
@@ -100,17 +102,17 @@ def run(
         manifest = json.load(handle)
 
     questions_config = load_questions_config(ROOT_DIR / "config")
+    if include_financiers is not None:
+        include_bilan = include_financiers
+        include_compte_resultat = include_financiers
 
-    _source_enabled = {
-        "operateur": include_operateur,
-        "patrimoine": include_patrimoine,
-        "finance": include_financiers,
-    }
-    all_fields = [
-        field for field in questions_config["fields"]
-        if isinstance(field, dict) and field.get("field_id")
-        and _source_enabled.get(field.get("_source"), True)
-    ]
+    all_fields = filter_fields_for_excel_tabs(
+        questions_config["fields"],
+        include_operation=include_operateur,
+        include_patrimoine=include_patrimoine,
+        include_bilan=include_bilan,
+        include_compte_resultat=include_compte_resultat,
+    )
     selected_audit_folder = manifest.get("selected_audit_folder")
 
     global_fields = [

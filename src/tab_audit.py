@@ -18,7 +18,7 @@ from pathlib import Path
 import streamlit as st
 
 from normalization import matches_pattern
-from question_config import load_questions_config
+from question_config import filter_fields_for_excel_tabs, load_questions_config
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -406,21 +406,21 @@ def render_audit_tab():
     </div>
     """, unsafe_allow_html=True)
 
+    st.caption("L'extraction LLM et la generation Excel sont toujours activees.")
+
+    col_left, col_right = st.columns(2)
+    with col_left:
+        run_operation = st.toggle("Opération", value=True)
+        run_bilan = st.toggle("Bilan", value=True)
+    with col_right:
+        run_patrimoine = st.toggle("Patrimoine", value=True)
+        run_compte_resultat = st.toggle("Compte de résultat", value=True)
+
     col_a, col_b = st.columns(2)
     with col_a:
-        run_extract = st.toggle("Extraction LLM", value=True)
         run_mandats = st.toggle("Mandats Pappers", value=True)
     with col_b:
-        run_fill = st.toggle("Generer Excel", value=True)
         send_email = st.toggle("Envoyer par email", value=False)
-
-    col_op, col_pat, col_fin = st.columns(3)
-    with col_op:
-        run_operateur = st.toggle("Opérateur", value=True)
-    with col_pat:
-        run_patrimoine = st.toggle("Patrimoine", value=True)
-    with col_fin:
-        run_financiers = st.toggle("Financiers", value=True)
 
     email_to = ""
     if send_email:
@@ -455,6 +455,9 @@ def render_audit_tab():
         if not selected_path:
             st.error("Selectionne un dossier.")
             return
+        if not any((run_operation, run_patrimoine, run_bilan, run_compte_resultat)):
+            st.error("Selectionne au moins un onglet Excel a generer.")
+            return
         if send_email and not email_to:
             st.error("Renseigne un email de notification pour activer l'envoi.")
             return
@@ -467,12 +470,10 @@ def render_audit_tab():
         started_perf = time.perf_counter()
 
         execution_plan = [("pipeline", "Pipeline Dropbox")]
-        if run_extract:
-            execution_plan.append(("extract", "Extraction LLM"))
+        execution_plan.append(("extract", "Extraction LLM"))
         if run_mandats:
             execution_plan.append(("mandats", "Mandats Pappers"))
-        if run_fill:
-            execution_plan.append(("fill", "Generation Excel"))
+        execution_plan.append(("fill", "Generation Excel"))
         if send_email and email_to:
             execution_plan.append(("email", "Envoi email"))
         total_steps = len(execution_plan)
@@ -519,51 +520,51 @@ def render_audit_tab():
         )
 
         # --- ETAPE 2 : Extraction LLM ---
-        if run_extract:
-            progress_bar.progress(
-                completed_steps / total_steps,
-                text=f"Etape {completed_steps + 1}/{total_steps} — Extraction LLM",
+        progress_bar.progress(
+            completed_steps / total_steps,
+            text=f"Etape {completed_steps + 1}/{total_steps} — Extraction LLM",
+        )
+        try:
+            status.update(label="Extraction LLM...")
+            st.write("**Extraction LLM** en cours...")
+            from extract_structured import run as run_extraction
+            run_extraction(
+                project_id,
+                include_operateur=run_operation,
+                include_patrimoine=run_patrimoine,
+                include_bilan=run_bilan,
+                include_compte_resultat=run_compte_resultat,
             )
-            try:
-                status.update(label="Extraction LLM...")
-                st.write("**Extraction LLM** en cours...")
-                from extract_structured import run as run_extraction
-                run_extraction(
-                    project_id,
-                    include_operateur=run_operateur,
-                    include_patrimoine=run_patrimoine,
-                    include_financiers=run_financiers,
-                )
 
-                results_path = project_dir / "extraction_results.json"
-                if results_path.exists():
-                    data = json.loads(results_path.read_text(encoding="utf-8"))
-                    summary = data.get("summary", {})
-                    answered = summary.get("answered", 0)
-                    total = summary.get("total", 0)
-                    asked_globals = summary.get("asked_global_fields")
-                    asked_person = summary.get("asked_person_fields")
-                    asked_company = summary.get("asked_company_fields")
-                    if all(isinstance(v, int) for v in (asked_globals, asked_person, asked_company)):
-                        results_summary["extract"] = (
-                            f"{answered}/{total} champs "
-                            f"(global {summary.get('answered_global_fields', 0)}/{asked_globals}, "
-                            f"personne {summary.get('answered_person_fields', 0)}/{asked_person}, "
-                            f"societe {summary.get('answered_company_fields', 0)}/{asked_company})"
-                        )
-                    else:
-                        results_summary["extract"] = f"{answered}/{total} champs"
-                    st.write(f"Extraction : {results_summary['extract']}")
+            results_path = project_dir / "extraction_results.json"
+            if results_path.exists():
+                data = json.loads(results_path.read_text(encoding="utf-8"))
+                summary = data.get("summary", {})
+                answered = summary.get("answered", 0)
+                total = summary.get("total", 0)
+                asked_globals = summary.get("asked_global_fields")
+                asked_person = summary.get("asked_person_fields")
+                asked_company = summary.get("asked_company_fields")
+                if all(isinstance(v, int) for v in (asked_globals, asked_person, asked_company)):
+                    results_summary["extract"] = (
+                        f"{answered}/{total} champs "
+                        f"(global {summary.get('answered_global_fields', 0)}/{asked_globals}, "
+                        f"personne {summary.get('answered_person_fields', 0)}/{asked_person}, "
+                        f"societe {summary.get('answered_company_fields', 0)}/{asked_company})"
+                    )
                 else:
-                    results_summary["extract"] = "OK"
-            except Exception as e:
-                st.error(f"Extraction : {e}")
-                results_summary["extract"] = f"ERREUR : {e}"
-            completed_steps += 1
-            progress_bar.progress(
-                completed_steps / total_steps,
-                text=f"Etape {completed_steps}/{total_steps} — Extraction LLM",
-            )
+                    results_summary["extract"] = f"{answered}/{total} champs"
+                st.write(f"Extraction : {results_summary['extract']}")
+            else:
+                results_summary["extract"] = "OK"
+        except Exception as e:
+            st.error(f"Extraction : {e}")
+            results_summary["extract"] = f"ERREUR : {e}"
+        completed_steps += 1
+        progress_bar.progress(
+            completed_steps / total_steps,
+            text=f"Etape {completed_steps}/{total_steps} — Extraction LLM",
+        )
 
         # --- ETAPE 3 : Mandats Pappers ---
         if run_mandats:
@@ -598,58 +599,58 @@ def render_audit_tab():
 
         # --- ETAPE 4 : Excel ---
         excel_path = None
-        if run_fill:
-            progress_bar.progress(
-                completed_steps / total_steps,
-                text=f"Etape {completed_steps + 1}/{total_steps} — Generation Excel",
-            )
-            try:
-                status.update(label="Generation Excel...")
-                st.write("**Excel** — Generation du rapport...")
-                from excel_filler import fill_excel
+        progress_bar.progress(
+            completed_steps / total_steps,
+            text=f"Etape {completed_steps + 1}/{total_steps} — Generation Excel",
+        )
+        try:
+            status.update(label="Generation Excel...")
+            st.write("**Excel** — Generation du rapport...")
+            from excel_filler import fill_excel
 
-                results_path = project_dir / "extraction_results.json"
-                if results_path.exists():
-                    extraction_data = json.loads(results_path.read_text(encoding="utf-8"))
-                    questions_data = load_questions_config(ROOT_DIR / "config")
+            results_path = project_dir / "extraction_results.json"
+            if results_path.exists():
+                extraction_data = json.loads(results_path.read_text(encoding="utf-8"))
+                questions_data = load_questions_config(ROOT_DIR / "config")
 
-                    person_folder_map = extraction_data.get("person_folders")
-                    pappers_mandats = None
-                    mandats_path = project_dir / "mandats_results.json"
-                    if mandats_path.exists():
-                        mandats_data = json.loads(mandats_path.read_text(encoding="utf-8"))
-                        pappers_mandats = mandats_data.get("societes_par_personne")
+                person_folder_map = extraction_data.get("person_folders")
+                pappers_mandats = None
+                mandats_path = project_dir / "mandats_results.json"
+                if run_mandats and mandats_path.exists():
+                    mandats_data = json.loads(mandats_path.read_text(encoding="utf-8"))
+                    pappers_mandats = mandats_data.get("societes_par_personne")
 
-                    _source_enabled = {
-                        "operateur": run_operateur,
-                        "patrimoine": run_patrimoine,
-                        "finance": run_financiers,
-                    }
-                    fields = [
-                        f for f in questions_data["fields"]
-                        if isinstance(f, dict) and f.get("field_id")
-                        and _source_enabled.get(f.get("_source"), True)
-                    ]
-                    excel_path = fill_excel(
-                        results=extraction_data["results"],
-                        fields=fields,
-                        output_dir=project_dir,
-                        person_folder_map=person_folder_map,
-                        pappers_mandats=pappers_mandats,
-                    )
-                    results_summary["fill"] = "rapport.xlsx"
-                    st.write("Excel : rapport.xlsx genere")
-                else:
-                    st.warning("extraction_results.json manquant — Excel non genere")
-                    results_summary["fill"] = "SKIP (pas de resultats)"
-            except Exception as e:
-                st.error(f"Excel : {e}")
-                results_summary["fill"] = f"ERREUR : {e}"
-            completed_steps += 1
-            progress_bar.progress(
-                completed_steps / total_steps,
-                text=f"Etape {completed_steps}/{total_steps} — Generation Excel",
-            )
+                fields = filter_fields_for_excel_tabs(
+                    questions_data["fields"],
+                    include_operation=run_operation,
+                    include_patrimoine=run_patrimoine,
+                    include_bilan=run_bilan,
+                    include_compte_resultat=run_compte_resultat,
+                )
+                excel_path = fill_excel(
+                    results=extraction_data["results"],
+                    fields=fields,
+                    output_dir=project_dir,
+                    person_folder_map=person_folder_map,
+                    pappers_mandats=pappers_mandats,
+                    include_operation=run_operation,
+                    include_patrimoine=run_patrimoine,
+                    include_bilan=run_bilan,
+                    include_compte_resultat=run_compte_resultat,
+                )
+                results_summary["fill"] = "rapport.xlsx"
+                st.write("Excel : rapport.xlsx genere")
+            else:
+                st.warning("extraction_results.json manquant — Excel non genere")
+                results_summary["fill"] = "SKIP (pas de resultats)"
+        except Exception as e:
+            st.error(f"Excel : {e}")
+            results_summary["fill"] = f"ERREUR : {e}"
+        completed_steps += 1
+        progress_bar.progress(
+            completed_steps / total_steps,
+            text=f"Etape {completed_steps}/{total_steps} — Generation Excel",
+        )
 
         # --- ETAPE 5 : Email ---
         if send_email and email_to and excel_path and excel_path.exists():
@@ -698,9 +699,13 @@ def render_audit_tab():
                 "success": all_ok,
                 "duration_seconds": round(duration_seconds, 1),
                 "options": {
-                    "extract": run_extract,
+                    "operation": run_operation,
+                    "patrimoine": run_patrimoine,
+                    "bilan": run_bilan,
+                    "compte_resultat": run_compte_resultat,
+                    "extract": True,
                     "mandats": run_mandats,
-                    "fill": run_fill,
+                    "fill": True,
                     "send_email": send_email,
                 },
                 "summary": results_summary,

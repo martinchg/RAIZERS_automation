@@ -217,9 +217,9 @@ def _is_radiated_company(company: dict) -> bool:
 # ---------------------------------------------------------------------------
 # Sheet builders
 # ---------------------------------------------------------------------------
-def _build_operation_sheet(wb: Workbook, results: Dict, fields: List[Dict]):
+def _build_operation_sheet(wb: Workbook, results: Dict, fields: List[Dict], ws=None):
     """Crée l'onglet Opération avec les champs simples, groupés par section."""
-    ws = wb.active
+    ws = ws or wb.active
     ws.title = "Opération"
 
     ws.column_dimensions["B"].width = 35
@@ -577,17 +577,33 @@ def _build_mandats_sheet(wb: Workbook, pappers_mandats: Dict):
 # ---------------------------------------------------------------------------
 def fill_excel(results: Dict, fields: List[Dict], output_dir: Path,
                person_folder_map: Optional[Dict[str, str]] = None,
-               pappers_mandats: Optional[Dict[str, List[dict]]] = None) -> Path:
+               pappers_mandats: Optional[Dict[str, List[dict]]] = None,
+               include_operation: bool = True,
+               include_patrimoine: bool = True,
+               include_bilan: bool = True,
+               include_compte_resultat: bool = True) -> Path:
     """Crée un Excel from scratch avec les données extraites."""
     output_path = output_dir / "rapport.xlsx"
     wb = Workbook()
+    default_ws = wb.active
 
     filled = 0
-    filled += _build_operation_sheet(wb, results, fields)
-    filled += _build_patrimoine_sheet(wb, results, fields, person_folder_map=person_folder_map)
-    filled += _build_bilan_sheet(wb, results, fields)
-    filled += _build_compte_resultat_sheet(wb, results)
+    if include_operation:
+        filled += _build_operation_sheet(wb, results, fields)
+    else:
+        wb.remove(default_ws)
+
+    if include_patrimoine:
+        filled += _build_patrimoine_sheet(wb, results, fields, person_folder_map=person_folder_map)
+    if include_bilan:
+        filled += _build_bilan_sheet(wb, results, fields)
+    if include_compte_resultat:
+        filled += _build_compte_resultat_sheet(wb, results)
     filled += _build_mandats_sheet(wb, pappers_mandats or {})
+
+    if not wb.sheetnames:
+        placeholder_ws = wb.create_sheet("Rapport")
+        placeholder_ws["A1"] = "Aucun onglet selectionne."
 
     wb.save(str(output_path))
     logger.info("Excel genere: %s", output_path)
