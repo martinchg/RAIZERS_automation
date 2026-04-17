@@ -44,8 +44,15 @@ def discover_question_files(config_dir: Path, explicit_path: Optional[str] = Non
 def load_questions_config(config_dir: Path, explicit_path: Optional[str] = None) -> Dict:
     question_files = discover_question_files(config_dir, explicit_path=explicit_path)
     if not question_files:
-        target = explicit_path or str(config_dir / LEGACY_FILENAME)
-        raise FileNotFoundError(f"Fichier(s) de questions introuvable(s): {target}")
+        if explicit_path:
+            target = explicit_path
+            raise FileNotFoundError(f"Fichier(s) de questions introuvable(s): {target}")
+
+        expected_files = ", ".join(DEFAULT_SPLIT_FILENAMES)
+        raise FileNotFoundError(
+            f"Fichier(s) de questions introuvable(s) dans {config_dir}. "
+            f"Fichiers attendus: {expected_files} ou {LEGACY_FILENAME}"
+        )
 
     merged_fields: List[Dict] = []
     seen_field_ids: Dict[str, Path] = {}

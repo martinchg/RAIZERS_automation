@@ -1,0 +1,107 @@
+{
+  "_description": "Champs à extraire des documents projet pour remplir le tableau Excel Book1.xlsx",
+  "_notes": [
+    "hint_keywords = mots-clés à chercher dans le filename/source_path pour matcher le document (matching canonique : casse/accents/préfixes numériques ignorés).",
+    "source_dirs = dossiers sources acceptés (le doc DOIT avoir sa source_path contenant l'un de ces dossiers comme sous-séquence de segments). Matching canonique tolérant : '*Audit', 'Audit 1', 'audit' s'équivalent. Les préfixes numériques ('0. ', '1. ', 'X. ') sont ignorés. Supporte {selected_audit_folder} = dossier d'audit choisi (résolu à runtime depuis le manifest).",
+    "source_doc_name = nom du document source (sans chemin complet). Permet de matcher par nom de fichier seul.",
+    "context_hint = contexte métier envoyé au LLM pour l'aider à distinguer les infos",
+    "excel_sheet = nom de l'onglet Excel. Pour les champs patrimoine, '{person_name}' = placeholder, le pipeline crée un onglet par personne.",
+    "type = 'string' pour valeur simple, 'table' pour données tabulaires (array d'objets JSON). Pour type 'table', excel_cell_start = première cellule de données, column_mapping = colonnes Excel par clé."
+  ],
+  "fields": [
+    {
+      "_comment": "=== TABLE 2 : SITUATION PATRIMONIALE (1 onglet par personne) ===",
+      "_naming_hint": "Le fichier source s'appelle souvent 'attestation patrimoniale complétée nom_prénom' mais pas forcément dans cet ordre. Exemples : 'Attestation patrimoniale complétée Dupont Jean.docx', 'Fiche de renseignements patrimoniale Martin Chassaing.pdf', 'Fiche patrimoniale SIGNATURE.pdf'. Il peuy avoir plusieurs fichiers prendre en priorité celle avec la template Raizers",
+      "field_id": "patrimoine_personne_nom",
+      "label": "Nom et prénom de la personne",
+      "question": "Quel est le nom complet (NOM Prénom) de la personne déclarant son patrimoine immobilier dans ce document ? S'il y a un couple (régime communauté), retourne les deux noms séparés par ' & '.",
+      "excel_cell": null,
+      "excel_sheet": "{person_name}",
+      "type": "string",
+      "format_hint": "NOM Prénom (ex: DUPONT Jean) ou NOM1 Prénom1 & NOM2 Prénom2 si couple",
+      "context_hint": "Ce nom servira de titre pour l'onglet Excel. Il est extrait du nom de fichier (ex: 'Attestation patrimoniale complétée Dupont Jean.docx') ou du contenu du document.",
+      "source_doc_name_variants": [
+        "attestation patrimoniale raizers",
+        "attestation patrimoniale completee",
+        "fiche patrimoniale",
+        "fiche de renseignements patrimoniale",
+        "fiche de renseignements patrimoniales",
+        "fiche patrimoniale raizers"
+      ],
+      "source_dirs": [
+        "*Audit/*Opérateur/*RH",
+        "*Audit/*Opérateur",
+        "*Audit/*Opérateur/*Ressources Humaines",
+        "*Audit/*Opérateur/RH"
+      ],
+      "hint_keywords": [
+        "attestation",
+        "patrimoniale",
+        "patrimoine"
+      ]
+    },
+    {
+      "field_id": "patrimoine_regime_matrimonial",
+      "label": "Régime matrimonial de l'opérateur",
+      "question": "Quel est le régime matrimonial de la personne ? (Séparation des biens, Communauté réduite aux acquêts, Communauté universelle, Célibataire, Pacsé, etc.). Très majoritairement à choisir entre 'Séparation des biens', 'Communauté légale réduite aux acquêts' ou 'Communauté universelle' mais vérifie bien le document pour être sûr. Si tu trouves une mention de régime matrimonial différent pour un couple, privilégie cette mention plutôt que les régimes individuels.",
+      "excel_cell": "D3",
+      "excel_sheet": "{person_name}",
+      "type": "string",
+      "format_hint": "ex: Séparation des biens",
+      "context_hint": "Le régime matrimonial figure souvent en haut du document d'attestation patrimoniale.",
+      "source_doc_name_variants": [
+        "attestation patrimoniale raizers",
+        "attestation patrimoniale completee",
+        "fiche de renseignements patrimoniale",
+        "fiche patrimoniale",
+        "fiche patrimoniale raizers"
+      ],
+      "source_dirs": [
+        "*Audit/*Opérateur/*RH",
+        "*Audit/*Opérateur"
+      ],
+      "hint_keywords": [
+        "attestation",
+        "patrimoniale",
+        "patrimoine"
+      ]
+    },
+    {
+      "field_id": "patrimoine_immobilier_table",
+      "label": "Tableau du patrimoine immobilier",
+      "question": "Extrais le tableau complet du patrimoine immobilier en detail. Les infos doivent venir uniquement du tableau patrimoine immobilier. Pour chaque bien, retourne un objet JSON avec les clés suivantes : type_detention (type de bien en y ajoutant la surface si elle est présente, par exemple 'Maison - 73 m²', 'Appartement - 45 m²', 'Immeuble - 210 m²', sinon retourne seulement le type de bien), pct_detention (pourcentage de détention, en pourcentage suivi de %), adresse (adresse complète + destination : RP=Résidence Principale, RS=Résidence Secondaire, RL=Résidence Locative), valeur_bien (valeur à trouver dans 'estimation actuelle du bien', nombre sans €), valeur_banque (valeur à trouver dans 'capital restant dû' , nombre sans €, sinon null), revenus_locatifs (revenus annuels si locatif ou fonciers, à trouver dans le tableau patrimoine immobilier ou le tableau revenus de type fonciser ou immobilier ou loyers, nombre seul sans €, sinon null), garanties_donnees (CP=Caution personnelle, GAPD=Garantie à première demande, HP=Hypothèque, PPD=Privilège de prêteur de deniers, NANT=nantissement, FD=Fiducie...). Retourne un array JSON de ces objets.",
+      "excel_cell_start": "B9",
+      "excel_sheet": "{person_name}",
+      "type": "table",
+      "column_mapping": {
+        "type_detention": "B",
+        "pct_detention": "C",
+        "adresse": "D",
+        "valeur_bien": "E",
+        "valeur_banque": "F",
+        "revenus_locatifs": "H",
+        "garanties_donnees": "I"
+      },
+      "format_hint": "Array JSON d'objets, un par bien immobilier",
+      "context_hint": "Le tableau patrimoine immobilier liste tous les biens détenus par la personne. Si la surface du bien est présente dans le tableau, ajoute-la directement dans la valeur de type_detention au format 'Type - surface m²'. Les valeurs monétaires sont des nombres sans €. La colonne G (valeur nette détenue) est calculée par formule Excel = (E-F)*C, ne pas la remplir.",
+      "source_doc_name_variants": [
+        "attestation patrimoniale",
+        "attestation patrimoniale completee"
+      ],
+      "source_dirs": [
+        "*Audit/*Opérateur/*RH",
+        "*Audit/*Opérateur"
+      ],
+      "hint_keywords": [
+        "attestation",
+        "patrimoniale",
+        "patrimoine",
+        "attestation patrimoniale",
+        "attestation patrimoniale completee",
+        "fiche de renseignements patrimoniale",
+        "fiche patrimoniale raizers",
+        "fiche patrimoniale" 
+      ]
+    }
+  ]
+}

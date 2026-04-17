@@ -13,7 +13,6 @@ import streamlit as st
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from immo_scoring import (
-    COMPARABLE_RULES,
     ComparableScorer,
     PropertyType,
     SubjectProperty,
@@ -723,7 +722,10 @@ class ComparablePipeline:
 
         reverse = {}
         if longitude is not None and latitude is not None:
-            reverse = reverse_geocode(longitude, latitude)
+            try:
+                reverse = reverse_geocode(longitude, latitude)
+            except Exception:
+                reverse = {}
 
         comparable_address = self._build_comparable_address(props, reverse)
         street_name = self._extract_street_name(props, reverse)
@@ -749,23 +751,7 @@ class ComparablePipeline:
         subject: SubjectProperty,
         comparables: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        rules = COMPARABLE_RULES[subject.property_type]
-        sorted_comparables = self._sort_comparables(comparables)
-
-        selected = self._apply_selection_rules(
-            sorted_comparables,
-            min_score=rules["primary_min_score"],
-            target_count=MAX_RETAINED_COMPARABLES,
-        )
-
-        if len(selected) < MAX_RETAINED_COMPARABLES:
-            selected = self._apply_selection_rules(
-                sorted_comparables,
-                min_score=rules["fallback_min_score"],
-                target_count=MAX_RETAINED_COMPARABLES,
-            )
-
-        return selected
+        return self._sort_comparables(comparables)[:MAX_RETAINED_COMPARABLES]
 
     @staticmethod
     def _sort_comparables(comparables: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -777,25 +763,6 @@ class ComparablePipeline:
                 comp.get("distance_m") if comp.get("distance_m") is not None else float("inf"),
             ),
         )
-
-    def _apply_selection_rules(
-        self,
-        comparables: List[Dict[str, Any]],
-        *,
-        min_score: int,
-        target_count: int = MAX_RETAINED_COMPARABLES,
-    ) -> List[Dict[str, Any]]:
-        selected: List[Dict[str, Any]] = []
-
-        for comp in comparables:
-            if len(selected) >= target_count:
-                break
-            if (comp.get("similarity_score") or 0) < min_score:
-                continue
-
-            selected.append(comp)
-
-        return selected
 
     def _format_comparable_for_display(self, comp: Dict[str, Any], *, retained: bool) -> Dict[str, Any]:
         return {

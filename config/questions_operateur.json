@@ -1,0 +1,417 @@
+{
+  "_description": "Champs à extraire des documents projet pour remplir le tableau Excel Book1.xlsx",
+  "_notes": [
+    "hint_keywords = mots-clés à chercher dans le filename/source_path pour matcher le document (matching canonique : casse/accents/préfixes numériques ignorés).",
+    "source_dirs = dossiers sources acceptés (le doc DOIT avoir sa source_path contenant l'un de ces dossiers comme sous-séquence de segments). Matching canonique tolérant : '*Audit', 'Audit 1', 'audit' s'équivalent. Les préfixes numériques ('0. ', '1. ', 'X. ') sont ignorés. Supporte {selected_audit_folder} = dossier d'audit choisi (résolu à runtime depuis le manifest).",
+    "source_doc_name = nom du document source (sans chemin complet). Permet de matcher par nom de fichier seul.",
+    "context_hint = contexte métier envoyé au LLM pour l'aider à distinguer les infos",
+    "excel_sheet = nom de l'onglet Excel. Pour les champs patrimoine, '{person_name}' = placeholder, le pipeline crée un onglet par personne.",
+    "type = 'string' pour valeur simple, 'table' pour données tabulaires (array d'objets JSON). Pour type 'table', excel_cell_start = première cellule de données, column_mapping = colonnes Excel par clé."
+  ],
+  "fields": [
+    {
+      "field_id": "siren_emprunt",
+      "label": "N° SIREN (société emprunt)",
+      "question": "Quel est le numéro SIREN de la société portant l'EMPRUNT ? Retourne uniquement le numéro à 9 chiffres.",
+      "excel_cell": "D2",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": "9 chiffres avec espaces (ex: 123 456 789)",
+      "context_hint": "C'est la société ÉMETTRICE des obligations, celle qui emprunte via Raizers. C'est celle qui figure dans 'Identification de la personne morale' du fichier Kbis, ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'.",
+      "source_dirs": [
+        "*Audit/*Opérateur/*Eléments juridiques/Société Emprunteuse"
+      ],
+      "hint_keywords": [
+        "kbis",
+        "statut",
+        "contrat obligataire"
+      ]
+    },
+    {
+      "field_id": "ville_rcs_emprunt",
+      "label": "Ville du RCS (société emprunt)",
+      "question": "Quelle est la ville du RCS (Registre du Commerce et des Sociétés) de la société portant l'emprunt ?",
+      "excel_cell": "D3",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": null,
+      "context_hint": "La ville du RCS est celle du tribunal de commerce où la société emprunteuse est enregistrée. C'est celle qui figure dans identification de la personne morale du fichier Kbis, ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'.",
+      "source_dirs": [
+        "*Audit/*Opérateur/*Eléments juridiques/Société Emprunteuse"
+      ],
+      "hint_keywords": [
+        "kbis",
+        "statut"
+      ]
+    },
+    {
+      "field_id": "date_immatriculation_emprunt",
+      "label": "Date d'immatriculation (société emprunt)",
+      "question": "Quelle est la date d'immatriculation de la société portant l'emprunt ?",
+      "excel_cell": "D4",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": "format JJ/MM/AAAA",
+      "context_hint": "Date d'immatriculation au RCS de la société emprunteuse. C'est celle qui figure dans identification de la personne morale du fichier Kbis, ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'.",
+      "source_dirs": [
+        "*Audit/*Opérateur/*Eléments juridiques/Société Emprunteuse"
+      ],
+      "hint_keywords": [
+        "kbis"
+      ]
+    },
+    {
+      "field_id": "raison_sociale_emprunt",
+      "label": "Raison Sociale (société emprunt)",
+      "question": "Quelle est la raison sociale exacte de la société portant l'emprunt ?",
+      "excel_cell": "D5",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": null,
+      "context_hint": "Nom officiel de la société emprunteuse (émettrice des obligations). C'est celle qui figure dans identification de la personne morale du fichier Kbis, ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'.",
+      "source_dirs": [
+        "*Audit/*Opérateur/*Eléments juridiques/Société Emprunteuse"
+      ],
+      "hint_keywords": [
+        "kbis",
+        "statut",
+        "contrat obligataire"
+      ]
+    },
+    {
+      "field_id": "forme_juridique_emprunt",
+      "label": "Forme Juridique (société emprunt)",
+      "question": "Quelle est la forme juridique de la société portant l'emprunt ? (SAS, SARL, SA, SCI, SCCV, etc.)",
+      "excel_cell": "D6",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": null,
+      "context_hint": "Forme juridique de la société emprunteuse. C'est celle qui figure dans identification de la personne morale du fichier Kbis, ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'.",
+      "source_dirs": [
+        "*Audit/*Opérateur/*Eléments juridiques/Société Emprunteuse"
+      ],
+      "hint_keywords": [
+        "kbis",
+        "statut"
+      ]
+    },
+    {
+      "field_id": "capital_social_emprunt",
+      "label": "Capital social (société emprunt)",
+      "question": "Quel est le montant du capital social de la société portant l'emprunt ? Retourne uniquement le nombre, sans le symbole €.",
+      "excel_cell": "D7",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": "nombre avec espaces séparateurs de milliers, sans € (ex: 10 000).Ce montant apparait dans la section 'Identification de la personne morale' du Kbis, ou dans les statuts. Si tu trouves les deux, privilégie le montant du Kbis. Ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'.",
+      "context_hint": "Capital social de la société emprunteuse uniquement.",
+      "source_dirs": [
+        "*Audit/*Opérateur/*Eléments juridiques/Société Emprunteuse"
+      ],
+      "hint_keywords": [
+        "kbis",
+        "statut",
+        "bilan"
+      ]
+    },
+    {
+      "field_id": "adresse_siege_emprunt",
+      "label": "Adresse du siège (société emprunt)",
+      "question": "Quelle est l'adresse complète du siège social de la société portant l'emprunt ? cette adresse figure dans la section 'Identification de la personne morale' du Kbis, ou dans les statuts. Si tu trouves les deux, privilégie l'adresse du Kbis. Ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'.",
+      "excel_cell": "D8",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": null,
+      "context_hint": "Adresse du siège de la société emprunteuse.",
+      "source_dirs": [
+        "*Audit/*Opérateur/*Eléments juridiques/Société Emprunteuse"
+      ],
+      "hint_keywords": [
+        "kbis",
+        "statut"
+      ]
+    },
+    {
+      "field_id": "activite_emprunt",
+      "label": "Activité (société emprunt)",
+      "question": "Quelle est l'activité de la société portant l'emprunt, telle qu'elle apparaîtrait sur infogreffe ?",
+      "excel_cell": "D9",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": null,
+      "context_hint": "L'objet social ou activité principale de la société emprunteuse. C'est celle qui figure dans identification de la personne morale du fichier Kbis, ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'. Il faut la transformer pour renvoyer uniquement l'essentiel si elle est trop longue, c'est l'intitulé de l'activité typiquement ecrit sur infogreffe.",
+      "source_dirs": [
+        "*Audit/*Opérateur/*Eléments juridiques/Société Emprunteuse"
+      ],
+      "hint_keywords": [
+        "kbis",
+        "statut"
+      ]
+    },
+    {
+      "field_id": "dirigeants_emprunt",
+      "label": "Dirigeant(s) (société emprunt)",
+      "question": "Qui sont le ou les dirigeants de la société portant l'emprunt ? Le dirigeant peut être une personne physique OU une société. Prends en priorité la liste figurant dans la section 'GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES' du Kbis. S'il existe un président, fais-le apparaître en premier, même si c'est une société. Si une autre personne a le pouvoir de diriger, gérer ou engager à titre habituel, conserve-la aussi. Retourne un texte lisible, pas un array JSON, au format 'NOM OU DENOMINATION - fonction ; NOM OU DENOMINATION - fonction'.",
+      "excel_cell": "D10",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": "Texte lisible sans JSON, ex: SIGNATURE - Président ; CHASSAING Martin - Directeur Général",
+      "context_hint": "Dirigeants de la société emprunteuse (président, gérant, DG). Le président peut être une personne morale.",
+      "source_dirs": [
+        "*Audit/*Opérateur/*Eléments juridiques/Société Emprunteuse"
+      ],
+      "hint_keywords": [
+        "kbis",
+        "statut"
+      ]
+    },
+    {
+      "field_id": "siren_operation",
+      "label": "N° SIREN (société opération)",
+      "question": "Si la société portant l'opération est différente de celle portant l'emprunt, quel est son numéro SIREN ? Sinon retourne null.",
+      "excel_cell": "D11",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": "9 chiffres avec espaces, ou null si même société",
+      "context_hint": "La société opération est celle qui porte le projet immobilier (souvent SCI ou SCCV). Si c'est la même que l'emprunteur, retourne null.",
+      "source_dirs": [
+        "*Audit/*Opérateur/*Eléments juridiques/Société Opération",
+        "*Audit/{selected_audit_folder}"
+      ],
+      "hint_keywords": [
+        "kbis",
+        "statut"
+      ]
+    },
+    {
+      "field_id": "ville_rcs_operation",
+      "label": "Ville du RCS (société opération)",
+      "question": "Si la société portant l'opération est différente, quelle est la ville de son RCS ?",
+      "excel_cell": "D12",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": null,
+      "context_hint": "Ville du RCS de la société portant l'opération (si différente de l'emprunteuse).",
+      "source_dirs": [
+        "*Audit/*Opérateur/*Eléments juridiques/Société Opération",
+        "*Audit/{selected_audit_folder}"
+      ],
+      "hint_keywords": [
+        "kbis",
+        "statut"
+      ]
+    },
+    {
+      "field_id": "date_immatriculation_operation",
+      "label": "Date d'immatriculation (société opération)",
+      "question": "Si la société portant l'opération est différente, quelle est sa date d'immatriculation ?",
+      "excel_cell": "D13",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": "format JJ/MM/AAAA ou null",
+      "context_hint": "Date d'immatriculation de la société portant l'opération.",
+      "source_dirs": [
+        "*Audit/*Opérateur/*Eléments juridiques/Société Opération",
+        "*Audit/{selected_audit_folder}"
+      ],
+      "hint_keywords": [
+        "kbis"
+      ]
+    },
+    {
+      "field_id": "raison_sociale_operation",
+      "label": "Raison Sociale (société opération)",
+      "question": "Si la société portant l'opération est différente, quelle est sa raison sociale exacte ?",
+      "excel_cell": "D14",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": null,
+      "context_hint": "Nom officiel de la société portant l'opération immobilière.",
+      "source_dirs": [
+        "*Audit/*Opérateur/*Eléments juridiques/Société Opération",
+        "*Audit/{selected_audit_folder}"
+      ],
+      "hint_keywords": [
+        "kbis",
+        "statut",
+        "contrat obligataire"
+      ]
+    },
+    {
+      "field_id": "forme_juridique_operation",
+      "label": "Forme Juridique (société opération)",
+      "question": "Si la société portant l'opération est différente, quelle est sa forme juridique ?",
+      "excel_cell": "D15",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": null,
+      "source_dirs": [
+        "*Audit/*Opérateur/*Eléments juridiques/Société Opération",
+        "*Audit/{selected_audit_folder}"
+      ],
+      "hint_keywords": [
+        "kbis",
+        "statut"
+      ]
+    },
+    {
+      "field_id": "capital_social_operation",
+      "label": "Capital social (société opération)",
+      "question": "Si la société portant l'opération est différente, quel est son capital social ? Sans le symbole €.",
+      "excel_cell": "D16",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": "nombre avec espaces, sans €, ou null",
+      "source_dirs": [
+        "*Audit/*Opérateur/*Eléments juridiques/Société Opération",
+        "*Audit/{selected_audit_folder}"
+      ],
+      "hint_keywords": [
+        "kbis",
+        "statut",
+        "bilan"
+      ]
+    },
+    {
+      "field_id": "adresse_siege_operation",
+      "label": "Adresse du siège (société opération)",
+      "question": "Si la société portant l'opération est différente, quelle est l'adresse de son siège social ?",
+      "excel_cell": "D17",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": null,
+      "source_dirs": [
+        "*Audit/*Opérateur/*Eléments juridiques/Société Opération",
+        "*Audit/{selected_audit_folder}"
+      ],
+      "hint_keywords": [
+        "kbis",
+        "statut"
+      ]
+    },
+    {
+      "field_id": "activite_operation",
+      "label": "Activité (société opération)",
+      "question": "Si la société portant l'opération est différente, quelle est son activité ?",
+      "excel_cell": "D18",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": null,
+      "context_hint": "L'objet social ou activité principale de la société qui gère l'opération. C'est celle qui figure dans identification de la personne morale du fichier Kbis, ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'. Il faut la transformer pour renvoyer uniquement l'essentiel si elle est trop longue, c'est l'intitulé de l'activité typiquement ecrit sur infogreffe.",
+      "source_dirs": [
+        "*Audit/*Opérateur/*Eléments juridiques/Société Opération",
+        "*Audit/{selected_audit_folder}"
+      ],
+      "hint_keywords": [
+        "kbis",
+        "statut"
+      ]
+    },
+    {
+      "field_id": "dirigeants_operation",
+      "label": "Dirigeant(s) (société opération)",
+      "question": "Si la société portant l'opération est différente, qui sont ses dirigeants ? Le dirigeant peut être une personne physique OU une société. Prends en priorité la liste du Kbis. S'il existe un président, fais-le apparaître en premier, même si c'est une société. Si une autre personne a le pouvoir de diriger, gérer ou engager à titre habituel, conserve-la aussi. Retourne un texte lisible, pas un array JSON, au format 'NOM OU DENOMINATION - fonction ; NOM OU DENOMINATION - fonction'.",
+      "excel_cell": "D19",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": "Texte lisible sans JSON, ex: SIGNATURE - Président ; CHASSAING Martin - Directeur Général",
+      "context_hint": "Dirigeants de la société opération. Le président peut être une personne morale.",
+      "source_dirs": [
+        "*Audit/*Opérateur/*Eléments juridiques/Société Opération",
+        "*Audit/{selected_audit_folder}"
+      ],
+      "hint_keywords": [
+        "kbis",
+        "statut"
+      ]
+    },
+    {
+      "field_id": "objet_financement",
+      "label": "Objet du financement",
+      "question": "Identifie la nature précise de l'opération (acquisition, construction, rénovation, marchand de biens, etc.) en listant toutes les étapes combinées si nécessaire, selon les sections 'Objet' ou 'Utilisation des fonds' du contrat obligataire",
+      "excel_cell": "D20",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": null,
+      "context_hint": "L'objet décrit ce que finance l'emprunt obligataire : achat-revente, construction, rénovation, promotion, etc.",
+      "hint_keywords": [
+        "contrat obligataire",
+        "contrat",
+        "financement"
+      ]
+    },
+    {
+      "field_id": "localisation_projet",
+      "label": "Localisation du projet",
+      "question": "Extrais uniquement l'adresse physique PRECISE du projet immobilier lui-même (numéro, voie, code postal, ville si disponibles). Ne retourne PAS une simple ville, une zone géographique large, l'adresse du siège social, l'adresse d'un dirigeant, celle du vendeur, du notaire, d'un prestataire ou d'un autre actif. Si le document ne donne qu'une localisation vague (ex: seulement une ville ou un quartier), retourne null.",
+      "type": "string",
+      "format_hint": null,
+      "context_hint": "On veut l'adresse exacte de l'actif financé, pas une localisation approximative. Une réponse du type 'La Teste de Buch' seule n'est pas acceptable. Privilégie les documents de l'opération elle-même : contrat obligataire, promesse, acquisition, commercialisation, devis ou présentation du programme.",
+      "source_dirs": [
+        "*Audit/{selected_audit_folder}"
+      ],
+      "hint_keywords": [
+        "adresse du projet",
+        "contrat obligataire",
+        "promesse",
+        "acquisition",
+        "devis",
+        "commercialisation",
+        "programme"
+      ]
+    },
+    {
+      "field_id": "taux_interet",
+      "label": "Taux d'intérêt de l'obligation",
+      "question": "Quel est le taux d'intérêt annuel de l'obligation ? Retourne le pourcentage (ex: 8.5).",
+      "excel_cell": "D22",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": "nombre + % (ex: 8.5%)",
+      "context_hint": "Le taux d'intérêt annuel fixe des obligations émises. Peut aussi être appelé 'taux nominal' ou 'coupon'.",
+      "hint_keywords": [
+        "contrat obligataire",
+        "contrat",
+        "obligation",
+        "taux",
+        "intérêt",
+        "coupon"
+      ]
+    },
+    {
+      "field_id": "montant_collecte",
+      "label": "Montant de la collecte",
+      "question": "Quel est le montant total de la collecte obligataire ? Retourne uniquement le nombre, sans €.",
+      "excel_cell": "D23",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": "nombre avec espaces, sans € (ex: 1 500 000)",
+      "context_hint": "C'est le montant maximum de l'émission obligataire (pas le montant du projet total). Souvent mentionné comme 'montant de l'emprunt obligataire'.",
+      "hint_keywords": [
+        "contrat obligataire",
+        "contrat",
+        "obligation",
+        "montant de l'emprunt",
+        "montant de la collecte",
+        "montant de l'émission",
+        "montant total"
+      ]
+    },
+    {
+      "field_id": "maturite_mois",
+      "label": "Maturité (en mois)",
+      "question": "Quelle est la maturité de l'obligation en mois ?",
+      "excel_cell": "D27",
+      "excel_sheet": "Opération",
+      "type": "string",
+      "format_hint": "nombre de mois (ex: 24)",
+      "hint_keywords": [
+        "contrat obligataire",
+        "contrat",
+        "obligation",
+        "maturité",
+        "durée",
+        "échéance"
+      ]
+    }
+  ]
+}

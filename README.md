@@ -67,9 +67,12 @@ Options avancées :
 ```bash
 python run.py fill \
   --results output/raizers-en-audit-signature/extraction_results.json \
-  --questions config/questions.json \
+  --questions config/questions_operateur.json \
   --output-dir output/raizers-en-audit-signature
 ```
+
+Sans `--questions`, le remplissage charge automatiquement les fichiers split du dossier `config/`
+(`questions_operateur.json`, `questions_patrimoine.json`, `questions_finance.json`).
 
 ## Lancement Streamlit
 

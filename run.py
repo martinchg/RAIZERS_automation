@@ -87,9 +87,9 @@ def main():
             parser.error("fill requiert --project ou --results")
 
         # Override sys.argv pour le sous-parser d'excel_filler
-        argv = ["excel_filler.py",
-                "--results", results_path,
-                "--questions", args.questions]
+        argv = ["excel_filler.py", "--results", results_path]
+        if args.questions:
+            argv += ["--questions", args.questions]
         if output_dir:
             argv += ["--output-dir", output_dir]
         sys.argv = argv
