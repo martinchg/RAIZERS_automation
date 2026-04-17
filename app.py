@@ -256,6 +256,7 @@ if not st.session_state.authenticated:
 
     col_left, col_center, col_right = st.columns([1.2, 2.6, 1.2])
     with col_center:
+        st.markdown("#### Connexion")
         if not auth_user or not auth_pass:
             st.error(
                 f"Authentification non configurée. Ajoute {AUTH_USER_ENV} et {AUTH_PASS_ENV} "
