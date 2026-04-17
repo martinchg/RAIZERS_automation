@@ -1038,7 +1038,8 @@ def render_real_estate_tab():
             scorer=ComparableScorer(),
         )
 
-        result = pipeline.run(payload)
+        with st.spinner("Comparatif immobilier en cours..."):
+            result = pipeline.run(payload)
         st.session_state["immo_result"] = result
 
     except ValidationError as exc:

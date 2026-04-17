@@ -82,6 +82,42 @@ def _is_per_company_field(field: Dict) -> bool:
     return field.get("excel_sheet") == "{company_name}"
 
 
+def _count_answered_requested_fields(questions: List[Dict], answers: Optional[Dict]) -> tuple[int, int]:
+    requested_ids = []
+    seen = set()
+    for field_id in requested_field_ids(questions):
+        if field_id and field_id not in seen:
+            requested_ids.append(field_id)
+            seen.add(field_id)
+
+    if not isinstance(answers, dict):
+        return 0, len(requested_ids)
+
+    answered_count = sum(
+        1 for field_id in requested_ids
+        if _has_meaningful_value(answers.get(field_id))
+    )
+    return answered_count, len(requested_ids)
+
+
+def _build_document_field_statuses(questions: List[Dict], answers: Optional[Dict]) -> List[Dict[str, str]]:
+    requested_ids = []
+    seen = set()
+    for field_id in requested_field_ids(questions):
+        if field_id and field_id not in seen:
+            requested_ids.append(field_id)
+            seen.add(field_id)
+
+    answer_dict = answers if isinstance(answers, dict) else {}
+    return [
+        {
+            "field_id": field_id,
+            "status": "rempli" if _has_meaningful_value(answer_dict.get(field_id)) else "vide",
+        }
+        for field_id in requested_ids
+    ]
+
+
 def run(
     project_id: str,
     include_operateur: bool = True,
@@ -277,6 +313,13 @@ def run(
         answers = parse_json_response(raw_response)
         if not answers and raw_response:
             logger.error("Reponse non JSON pour %s", filename)
+        text_answered, text_requested = _count_answered_requested_fields(questions_to_ask, answers)
+        logger.info(
+            "LLM texte %s: %s/%s champs remplis",
+            filename,
+            text_answered,
+            text_requested,
+        )
 
         llm_answers_initial: Optional[Dict] = json_clone(answers) if isinstance(answers, dict) else None
         llm_answers_multimodal: Optional[Dict] = None
@@ -317,6 +360,16 @@ def run(
                     else:
                         multimodal_answers = parse_json_response(multimodal_response)
                         if multimodal_answers:
+                            multimodal_answered, multimodal_requested = _count_answered_requested_fields(
+                                questions_to_ask,
+                                multimodal_answers,
+                            )
+                            logger.info(
+                                "LLM multimodal %s: %s/%s champs remplis",
+                                filename,
+                                multimodal_answered,
+                                multimodal_requested,
+                            )
                             llm_answers_multimodal = json_clone(multimodal_answers)
                             multimodal_answers = prepare_financial_answers(multimodal_answers)
                             multimodal_validation = validate_financial_answers(multimodal_answers)
@@ -340,10 +393,11 @@ def run(
                 quality_report_final = financial_answers_quality_report(answers, final_validation_errors)
 
             logger.info(
-                "Strategie financiere retenue pour %s: %s (score=%s)",
+                "Strategie financiere retenue pour %s: %s (score=%s, champs=%s/%s)",
                 filename,
                 selected_strategy,
                 quality_report_final.get("score"),
+                *_count_answered_requested_fields(questions_to_ask, answers),
             )
 
         debug_path = write_native_financial_debug(
@@ -434,12 +488,15 @@ def run(
                         results[key] = stringify_non_table_value(value)
                     found += 1
 
+        document_field_statuses = _build_document_field_statuses(questions_to_ask, answers)
+
         extraction_log.append(
             {
                 "document_id": document_id,
                 "filename": filename,
                 "questions_asked": len(questions_to_ask),
                 "answers_found": found,
+                "field_statuses": document_field_statuses,
                 "native_debug_path": str(debug_path.relative_to(project_dir)) if debug_path else None,
                 "financial_strategy": selected_strategy if broad_financial_context else None,
                 "financial_quality_score": quality_report_final.get("score") if broad_financial_context else None,
@@ -510,6 +567,16 @@ def run(
         person_counter,
         company_counter,
     )
+    logger.info("Recap champs par document:")
+    for entry in extraction_log:
+        filename = entry.get("filename") or entry.get("document_id") or "document"
+        for field_status in entry.get("field_statuses", []):
+            logger.info(
+                "%s -> %s: %s",
+                filename,
+                field_status.get("field_id", ""),
+                field_status.get("status", "vide"),
+            )
     logger.info("Resultats ecrits: %s", results_path)
 
 

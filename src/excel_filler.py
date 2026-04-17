@@ -2,6 +2,7 @@ import argparse
 import json
 import logging
 import re
+import unicodedata
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import quote
