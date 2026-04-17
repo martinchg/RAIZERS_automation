@@ -37,7 +37,6 @@ DVF_MONTH_WINDOW = 20
 DVF_PAGE_SIZE = 100
 DEFAULT_SEARCH_BBOX_DELTA = 0.002
 DEFAULT_SEARCH_RADIUS_M = int(round(DEFAULT_SEARCH_BBOX_DELTA * 111320))
-MAX_API_BBOX_SIZE_DEGREES = 0.02
 
 
 # -----------------------------------------------------------------------------
@@ -416,13 +415,11 @@ def _meters_to_lon_delta(meters: float, latitude: float) -> float:
     return meters / (111320 * latitude_factor)
 
 
-def _generate_bboxes_around(
+def _bbox_around(
     longitude: float,
     latitude: float,
     radius_m: float,
-    *,
-    max_bbox_size_degrees: float = MAX_API_BBOX_SIZE_DEGREES,
-) -> List[str]:
+) -> str:
     lat_delta = _meters_to_lat_delta(radius_m)
     lon_delta = _meters_to_lon_delta(radius_m, latitude)
 
@@ -431,23 +428,7 @@ def _generate_bboxes_around(
     lat_min = latitude - lat_delta
     lat_max = latitude + lat_delta
 
-    bboxes: List[str] = []
-    current_lon_min = lon_min
-
-    while current_lon_min < lon_max:
-        current_lon_max = min(current_lon_min + max_bbox_size_degrees, lon_max)
-        current_lat_min = lat_min
-
-        while current_lat_min < lat_max:
-            current_lat_max = min(current_lat_min + max_bbox_size_degrees, lat_max)
-            bboxes.append(
-                f"{current_lon_min},{current_lat_min},{current_lon_max},{current_lat_max}"
-            )
-            current_lat_min = current_lat_max
-
-        current_lon_min = current_lon_max
-
-    return bboxes or [f"{lon_min},{lat_min},{lon_max},{lat_max}"]
+    return f"{lon_min},{lat_min},{lon_max},{lat_max}"
 
 
 def _geometry_center(geometry: Dict[str, Any]) -> tuple[Optional[float], Optional[float]]:
@@ -515,17 +496,13 @@ class DVFClient:
             "format": "json",
         }
 
-        records_by_key: Dict[str, Dict[str, Any]] = {}
-        for bbox in _generate_bboxes_around(longitude, latitude, search_radius_m):
-            page_records = self._fetch_geomutations_page_set(
-                headers=headers,
-                params={**params, "in_bbox": bbox},
-            )
-            for record in page_records:
-                record_key = self._record_key(record)
-                records_by_key.setdefault(record_key, record)
-
-        records = list(records_by_key.values())
+        records = self._fetch_geomutations_page_set(
+            headers=headers,
+            params={
+                **params,
+                "in_bbox": _bbox_around(longitude, latitude, search_radius_m),
+            },
+        )
 
         filtered_records: List[Dict[str, Any]] = []
         for record in records:
@@ -655,9 +632,6 @@ class ComparablePipeline:
             comp = self._normalize_record(raw, subject)
             if comp is None:
                 continue
-            distance_m = comp.get("distance_m")
-            if distance_m is not None and distance_m > payload.search_radius_m:
-                continue
             comp["similarity_score"] = self.scorer.score(
                 subject,
                 comp,
@@ -691,7 +665,6 @@ class ComparablePipeline:
                 2,
             )
 
-        eligible_comparables = self._deduplicate_same_address_keep_highest_price(eligible_comparables)
         sorted_comparables = self._sort_comparables(eligible_comparables)
         retained_comparables = self._select_comparables(subject, sorted_comparables)
         retained_ids = {id(comp) for comp in retained_comparables}
@@ -735,8 +708,6 @@ class ComparablePipeline:
         total_price = self._to_float(props.get("valeurfonc") or props.get("valeur_fonciere"))
         sale_date = try_parse_date(props.get("datemut") or props.get("date_mutation"))
 
-        if sale_date is None:
-            return None
         if property_type != subject.property_type:
             return None
         valid_living_area = round(living_area, 2) if living_area is not None and living_area > 0 else None
@@ -752,19 +723,9 @@ class ComparablePipeline:
 
         reverse = {}
         if longitude is not None and latitude is not None:
-            try:
-                reverse = reverse_geocode(longitude, latitude)
-            except Exception:
-                reverse = {}
+            reverse = reverse_geocode(longitude, latitude)
 
-        comparable_address = reverse.get("label")
-        if not comparable_address:
-            address_parts = [
-                str(props.get("l_nomv") or "").strip(),
-                str(props.get("l_noma") or "").strip(),
-            ]
-            comparable_address = " ".join([p for p in address_parts if p])
-
+        comparable_address = self._build_comparable_address(props, reverse)
         street_name = self._extract_street_name(props, reverse)
 
         return {
@@ -805,58 +766,6 @@ class ComparablePipeline:
             )
 
         return selected
-
-    @staticmethod
-    def _deduplicate_same_address_keep_highest_price(
-        comparables: List[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
-        best_by_address: Dict[str, Dict[str, Any]] = {}
-        without_address: List[Dict[str, Any]] = []
-
-        for comp in comparables:
-            address = comp.get("address")
-            if not address:
-                without_address.append(comp)
-                continue
-
-            address_key = _normalize_address_text(str(address))
-            if not address_key:
-                without_address.append(comp)
-                continue
-
-            current_best = best_by_address.get(address_key)
-            if current_best is None or ComparablePipeline._is_better_same_address_candidate(comp, current_best):
-                best_by_address[address_key] = comp
-
-        return list(best_by_address.values()) + without_address
-
-    @staticmethod
-    def _is_better_same_address_candidate(
-        candidate: Dict[str, Any],
-        reference: Dict[str, Any],
-    ) -> bool:
-        candidate_price = candidate.get("total_price_eur") or 0
-        reference_price = reference.get("total_price_eur") or 0
-        if candidate_price != reference_price:
-            return candidate_price > reference_price
-
-        candidate_score = candidate.get("similarity_score") or 0
-        reference_score = reference.get("similarity_score") or 0
-        if candidate_score != reference_score:
-            return candidate_score > reference_score
-
-        candidate_date = candidate.get("sale_date")
-        reference_date = reference.get("sale_date")
-        if candidate_date and reference_date and candidate_date != reference_date:
-            return candidate_date > reference_date
-
-        candidate_distance = candidate.get("distance_m")
-        reference_distance = reference.get("distance_m")
-        if candidate_distance is None:
-            return False
-        if reference_distance is None:
-            return True
-        return candidate_distance < reference_distance
 
     @staticmethod
     def _sort_comparables(comparables: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -904,11 +813,43 @@ class ComparablePipeline:
         }
 
     @staticmethod
-    def _extract_street_name(raw: Dict[str, Any], reverse: Dict[str, Any]) -> Optional[str]:
+    def _build_comparable_address(
+        raw: Dict[str, Any],
+        reverse: Dict[str, Any],
+    ) -> Optional[str]:
+        if reverse.get("label"):
+            return str(reverse["label"]).strip()
+
+        address_parts = [
+            raw.get("l_num"),
+            raw.get("l_typvoie"),
+            raw.get("l_nomv"),
+            raw.get("l_noma"),
+            raw.get("nomvoie"),
+            raw.get("adresse"),
+        ]
+        cleaned_parts = []
+        for value in address_parts:
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text and text not in cleaned_parts:
+                cleaned_parts.append(text)
+
+        if cleaned_parts:
+            return " ".join(cleaned_parts)
+        return None
+
+    @staticmethod
+    def _extract_street_name(
+        raw: Dict[str, Any],
+        reverse: Dict[str, Any],
+    ) -> Optional[str]:
         for value in (
             reverse.get("street"),
             raw.get("l_nomv"),
             raw.get("l_noma"),
+            raw.get("l_typvoie"),
             raw.get("nomvoie"),
             raw.get("lieudit"),
             raw.get("localite"),
