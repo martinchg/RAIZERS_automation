@@ -40,14 +40,13 @@ from normalization import (
     matches_pattern,
     path_has_segments,
 )
+from question_config import load_question_fields
 
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 OUTPUT_DIR = ROOT_DIR / "output"
 LOCAL_CACHE = ROOT_DIR / "cache"
-QUESTIONS_PATH = ROOT_DIR / "config" / "questions.json"
-
 SUPPORTED_EXT = {".pdf", ".docx", ".txt", ".pptx", ".xlsx", ".xls", ".md", ".ppt"}
 PARENT_SIZE = 2000
 DEFAULT_DOC_TIMEOUT_SECONDS = int(os.environ.get("PIPELINE_DOC_TIMEOUT_SECONDS", "90"))
@@ -139,17 +138,11 @@ def _matches_any_pattern(name: str, patterns: List[str]) -> bool:
 
 
 def _load_question_fields() -> List[dict]:
-    if not QUESTIONS_PATH.exists():
-        logger.warning(f"Questions introuvables : {QUESTIONS_PATH}")
+    try:
+        return load_question_fields(ROOT_DIR / "config")
+    except FileNotFoundError as exc:
+        logger.warning("Questions introuvables : %s", exc)
         return []
-
-    with open(QUESTIONS_PATH, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    return [
-        field for field in data.get("fields", [])
-        if isinstance(field, dict) and field.get("field_id")
-    ]
 
 
 def _load_manual_exclude_patterns() -> List[str]:

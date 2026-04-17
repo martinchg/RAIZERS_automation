@@ -18,6 +18,7 @@ from pathlib import Path
 import streamlit as st
 
 from normalization import matches_pattern
+from question_config import load_questions_config
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -595,11 +596,9 @@ def render_audit_tab():
                 from excel_filler import fill_excel
 
                 results_path = project_dir / "extraction_results.json"
-                questions_path = ROOT_DIR / "config" / "questions.json"
-
-                if results_path.exists() and questions_path.exists():
+                if results_path.exists():
                     extraction_data = json.loads(results_path.read_text(encoding="utf-8"))
-                    questions_data = json.loads(questions_path.read_text(encoding="utf-8"))
+                    questions_data = load_questions_config(ROOT_DIR / "config")
 
                     person_folder_map = extraction_data.get("person_folders")
                     pappers_mandats = None

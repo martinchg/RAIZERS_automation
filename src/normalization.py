@@ -219,3 +219,44 @@ def is_archived_path(path: str) -> bool:
         if canon in {"old", "archive", "archives"}:
             return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# RH / personnes
+# ---------------------------------------------------------------------------
+_RH_CANON_ALIASES = {"rh", "ressources humaines"}
+
+
+def extract_person_folder(source_path: str) -> Optional[str]:
+    """Retourne le nom du sous-dossier personne sous RH, sinon None.
+
+    Matching tolérant : '3. RH', 'RH', '3. Ressources Humaines', 'ressources
+    humaines' (casse/accents/préfixes ignorés).
+
+    Exemples acceptés :
+    - 2. Audit/1. Opérateur/3. RH/Pernod/file.pdf       -> "Pernod"
+    - Audit/Opérateur/Ressources Humaines/Juliette/file.pdf -> "Juliette"
+
+    Exclut les fichiers directement dans le dossier RH et les chemins archivés.
+    """
+    if is_archived_path(source_path):
+        return None
+
+    raw_parts = [p for p in source_path.replace("\\", "/").split("/") if p]
+    canon_parts = [canonical_name(p) for p in raw_parts]
+
+    rh_idx = next(
+        (i for i, p in enumerate(canon_parts) if p in _RH_CANON_ALIASES),
+        None,
+    )
+    if rh_idx is None:
+        return None
+
+    # Veut STRICTEMENT un sous-dossier de RH (et un fichier en dessous).
+    if rh_idx + 1 >= len(raw_parts) - 1:
+        return None
+
+    candidate = raw_parts[rh_idx + 1]
+    if is_archived_path(candidate):
+        return None
+    return candidate

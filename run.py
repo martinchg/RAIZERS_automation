@@ -51,7 +51,11 @@ def main():
     p3 = sub.add_parser("fill", help="Remplir un Excel depuis extraction_results.json")
     p3.add_argument("--project", "-p", default=None, help="project_id")
     p3.add_argument("--results", default=None, help="Chemin vers extraction_results.json")
-    p3.add_argument("--questions", default=str(ROOT_DIR / "config" / "questions.json"))
+    p3.add_argument(
+        "--questions",
+        default=None,
+        help="Chemin vers un fichier de questions unique (sinon charge les fichiers split du dossier config)",
+    )
     p3.add_argument("--output-dir", default=None)
 
     args = parser.parse_args()

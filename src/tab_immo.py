@@ -5,13 +5,20 @@ import math
 import re
 import time
 import unicodedata
-from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Optional
 
 import requests
 import streamlit as st
 from pydantic import BaseModel, Field, ValidationError, field_validator
+
+from immo_scoring import (
+    COMPARABLE_RULES,
+    ComparableScorer,
+    PropertyType,
+    SubjectProperty,
+    normalize_micro_location,
+)
 
 
 # -----------------------------------------------------------------------------
@@ -30,13 +37,12 @@ DVF_MONTH_WINDOW = 20
 DVF_PAGE_SIZE = 100
 DEFAULT_SEARCH_BBOX_DELTA = 0.002
 DEFAULT_SEARCH_RADIUS_M = int(round(DEFAULT_SEARCH_BBOX_DELTA * 111320))
+MAX_API_BBOX_SIZE_DEGREES = 0.02
 
 
 # -----------------------------------------------------------------------------
 # Input / output models
 # -----------------------------------------------------------------------------
-
-PropertyType = Literal["appartement", "maison"]
 
 
 class ComparableRequest(BaseModel):
@@ -45,7 +51,7 @@ class ComparableRequest(BaseModel):
     living_area_sqm: float = Field(..., gt=0)
     rooms: int = Field(..., ge=1, le=20)
     land_area_sqm: Optional[float] = Field(None, ge=0)
-    search_radius_m: int = Field(DEFAULT_SEARCH_RADIUS_M, ge=50, le=2000)
+    search_radius_m: int = Field(DEFAULT_SEARCH_RADIUS_M, ge=50, le=5000)
     api_min_year: Optional[int] = Field(None, ge=2000, le=2100)
 
     @field_validator("land_area_sqm")
@@ -69,19 +75,6 @@ class ComparableRequest(BaseModel):
         return value
 
 
-class SubjectProperty(BaseModel):
-    normalized_address: str
-    latitude: float
-    longitude: float
-    city: Optional[str] = None
-    postcode: Optional[str] = None
-    property_type: PropertyType
-    living_area_sqm: float
-    rooms: int
-    land_area_sqm: Optional[float] = None
-    assumed_condition: str = "recent_bon_tres_bon_etat"
-
-
 # -----------------------------------------------------------------------------
 # Helpers
 # -----------------------------------------------------------------------------
@@ -98,13 +91,6 @@ def haversine_distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> 
         + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
     )
     return 2 * r * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
-
-
-def percent_gap(reference: Optional[float], value: Optional[float]) -> Optional[float]:
-    if reference is None or value is None or reference <= 0:
-        return None
-    return abs(value - reference) / reference
 
 
 
@@ -132,6 +118,75 @@ def format_french_number(value: Any) -> Any:
     if text.endswith(",0"):
         text = text[:-2]
     return text
+
+
+def format_subject_value(key: str, value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, date):
+        return value.strftime("%d/%m/%Y")
+    if key in {
+        "latitude",
+        "longitude",
+        "living_area_sqm",
+        "land_area_sqm",
+    }:
+        return format_french_number(value)
+    return value
+
+
+def build_subject_display_rows(subject: Dict[str, Any]) -> List[Dict[str, Any]]:
+    labels = {
+        "normalized_address": "Adresse",
+        "property_type": "Type de bien",
+        "living_area_sqm": "Surface habitable (m²)",
+        "rooms": "Nombre de pièces",
+        "land_area_sqm": "Surface terrain (m²)",
+        "city": "Ville",
+        "postcode": "Code postal",
+        "latitude": "Latitude",
+        "longitude": "Longitude",
+    }
+    ordered_keys = [
+        "normalized_address",
+        "property_type",
+        "living_area_sqm",
+        "rooms",
+        "land_area_sqm",
+        "city",
+        "postcode",
+        "latitude",
+        "longitude",
+    ]
+
+    rows: List[Dict[str, Any]] = []
+    for key in ordered_keys:
+        value = subject.get(key)
+        if value is None:
+            continue
+        rows.append({
+            "Champ": labels.get(key, key),
+            "Valeur": format_subject_value(key, value),
+        })
+    return rows
+
+
+def append_comparables_summary_row(
+    comparables: List[Dict[str, Any]],
+    statistics: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    if not comparables:
+        return comparables
+
+    rows = [dict(row) for row in comparables]
+    summary_row = {key: "" for key in rows[0].keys()}
+    summary_row["Retenu"] = "Synthèse"
+    summary_row["Adresse"] = "Moyenne des retenus"
+    summary_row["Prix de vente"] = format_french_number(statistics.get("average_total_price_eur"))
+    summary_row["Prix par m²"] = format_french_number(statistics.get("average_price_per_sqm_eur"))
+
+    rows.append(summary_row)
+    return rows
 
 
 def try_parse_date(value: Any) -> Optional[date]:
@@ -352,12 +407,47 @@ def get_address_suggestions(query: str, limit: int = 6) -> List[Dict[str, Any]]:
 
     return suggestions[:limit]
 
-def _bbox_around(longitude: float, latitude: float, delta: float = 0.002) -> str:
-    lon_min = longitude - delta
-    lat_min = latitude - delta
-    lon_max = longitude + delta
-    lat_max = latitude + delta
-    return f"{lon_min},{lat_min},{lon_max},{lat_max}"
+def _meters_to_lat_delta(meters: float) -> float:
+    return meters / 111320
+
+
+def _meters_to_lon_delta(meters: float, latitude: float) -> float:
+    latitude_factor = max(abs(math.cos(math.radians(latitude))), 0.1)
+    return meters / (111320 * latitude_factor)
+
+
+def _generate_bboxes_around(
+    longitude: float,
+    latitude: float,
+    radius_m: float,
+    *,
+    max_bbox_size_degrees: float = MAX_API_BBOX_SIZE_DEGREES,
+) -> List[str]:
+    lat_delta = _meters_to_lat_delta(radius_m)
+    lon_delta = _meters_to_lon_delta(radius_m, latitude)
+
+    lon_min = longitude - lon_delta
+    lon_max = longitude + lon_delta
+    lat_min = latitude - lat_delta
+    lat_max = latitude + lat_delta
+
+    bboxes: List[str] = []
+    current_lon_min = lon_min
+
+    while current_lon_min < lon_max:
+        current_lon_max = min(current_lon_min + max_bbox_size_degrees, lon_max)
+        current_lat_min = lat_min
+
+        while current_lat_min < lat_max:
+            current_lat_max = min(current_lat_min + max_bbox_size_degrees, lat_max)
+            bboxes.append(
+                f"{current_lon_min},{current_lat_min},{current_lon_max},{current_lat_max}"
+            )
+            current_lat_min = current_lat_max
+
+        current_lon_min = current_lon_max
+
+    return bboxes or [f"{lon_min},{lat_min},{lon_max},{lat_max}"]
 
 
 def _geometry_center(geometry: Dict[str, Any]) -> tuple[Optional[float], Optional[float]]:
@@ -409,27 +499,59 @@ class DVFClient:
         if self.token:
             headers["Authorization"] = "Token " + self.token
 
-        window_start = subtract_months(valuation_date, DVF_MONTH_WINDOW)
-        effective_api_min_year = min(window_start.year, api_min_year or window_start.year)
-        bbox_delta = search_radius_m / 111320
-        sbati_min = max(1, int(living_area_sqm * 0.30))
-        sbati_max = int(living_area_sqm * 1.70)
+        default_start_date = subtract_months(valuation_date, DVF_MONTH_WINDOW)
+        requested_start_date = (
+            date(int(api_min_year), 1, 1)
+            if api_min_year is not None
+            else default_start_date
+        )
+        effective_api_min_year = requested_start_date.year
 
         params: Dict[str, Any] = {
-            "in_bbox": _bbox_around(longitude, latitude, delta=bbox_delta),
             "anneemut_min": str(effective_api_min_year),
             "anneemut_max": str(valuation_date.year),
-            "sbati_min": sbati_min,
-            "sbati_max": sbati_max,
             "fields": "all",
             "page_size": DVF_PAGE_SIZE,
             "format": "json",
         }
 
-        if property_type == "maison" and land_area_sqm:
-            params["sterr_min"] = max(0, int(land_area_sqm * 0.30))
-            params["sterr_max"] = int(land_area_sqm * 2.00)
+        records_by_key: Dict[str, Dict[str, Any]] = {}
+        for bbox in _generate_bboxes_around(longitude, latitude, search_radius_m):
+            page_records = self._fetch_geomutations_page_set(
+                headers=headers,
+                params={**params, "in_bbox": bbox},
+            )
+            for record in page_records:
+                record_key = self._record_key(record)
+                records_by_key.setdefault(record_key, record)
 
+        records = list(records_by_key.values())
+
+        filtered_records: List[Dict[str, Any]] = []
+        for record in records:
+            props = record.get("properties", record)
+            sale_date = try_parse_date(props.get("datemut") or props.get("date_mutation"))
+            if sale_date is None:
+                continue
+            if requested_start_date <= sale_date <= valuation_date:
+                filtered_records.append(record)
+
+        filtered_records.sort(
+            key=lambda item: try_parse_date(
+                (item.get("properties", item)).get("datemut")
+                or (item.get("properties", item)).get("date_mutation")
+            )
+            or date.min,
+            reverse=True,
+        )
+        return filtered_records
+
+    def _fetch_geomutations_page_set(
+        self,
+        *,
+        headers: Dict[str, str],
+        params: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
         records: List[Dict[str, Any]] = []
         expected_count: Optional[int] = None
         page = 1
@@ -472,189 +594,25 @@ class DVFClient:
 
             page += 1
 
-        filtered_records: List[Dict[str, Any]] = []
-        for record in records:
-            props = record.get("properties", record)
-            sale_date = try_parse_date(props.get("datemut") or props.get("date_mutation"))
-            if sale_date is None:
-                continue
-            if window_start <= sale_date <= valuation_date:
-                filtered_records.append(record)
-
-        filtered_records.sort(
-            key=lambda item: try_parse_date(
-                (item.get("properties", item)).get("datemut")
-                or (item.get("properties", item)).get("date_mutation")
-            )
-            or date.min,
-            reverse=True,
-        )
-        return filtered_records
-
-# -----------------------------------------------------------------------------
-# Scoring
-# -----------------------------------------------------------------------------
-
-
-@dataclass
-class ScoringConfig:
-    apartment_location_points: int = 40
-    house_location_points: int = 35
-    rooms_points: int = 25
-    apartment_surface_points: int = 25
-    house_surface_points: int = 20
-    land_points: int = 10
-    freshness_points: int = 10
-    same_street_same_rooms_bonus: int = 10
-    same_street_surface_bonus: int = 5
-
-
-SCORING = ScoringConfig()
-
-
-class ComparableScorer:
-    def score(
-        self,
-        subject: SubjectProperty,
-        comp: Dict[str, Any],
-        reference_date: Optional[date] = None,
-    ) -> float:
-        score = 0.0
-        score += self._score_location(subject, comp)
-        score += self._score_rooms(subject, comp)
-        score += self._score_surface(subject, comp)
-        score += self._score_freshness(comp, reference_date=reference_date)
-
-        if subject.property_type == "maison":
-            score += self._score_land(subject, comp)
-
-        same_street = self._is_same_street(subject, comp)
-        same_rooms = comp.get("rooms") == subject.rooms
-        surface_gap = percent_gap(subject.living_area_sqm, comp.get("living_area_sqm"))
-
-        if same_street and same_rooms:
-            score += SCORING.same_street_same_rooms_bonus
-        if same_street and surface_gap is not None and surface_gap <= 0.15:
-            score += SCORING.same_street_surface_bonus
-
-        return round(min(score, 110), 2)
-
-    def _score_location(self, subject: SubjectProperty, comp: Dict[str, Any]) -> float:
-        max_points = (
-            SCORING.apartment_location_points
-            if subject.property_type == "appartement"
-            else SCORING.house_location_points
-        )
-        lat = comp.get("latitude")
-        lon = comp.get("longitude")
-        if lat is None or lon is None:
-            return 0
-
-        distance = haversine_distance_m(subject.latitude, subject.longitude, lat, lon)
-        comp["distance_m"] = round(distance, 1)
-
-        points = 0.0
-        if self._is_same_street(subject, comp):
-            points += 20
-        if distance <= 100:
-            points += 15
-        elif distance <= 300:
-            points += 10
-        elif distance <= 800:
-            points += 6
-        elif distance <= 2000:
-            points += 3
-        return min(points, max_points)
-
-    def _score_rooms(self, subject: SubjectProperty, comp: Dict[str, Any]) -> float:
-        rooms = comp.get("rooms")
-        if rooms is None:
-            return 0
-        gap = abs(rooms - subject.rooms)
-        if gap == 0:
-            return SCORING.rooms_points
-        if gap == 1:
-            return 10
-        if gap == 2:
-            return 3
-        return 0
-
-    def _score_surface(self, subject: SubjectProperty, comp: Dict[str, Any]) -> float:
-        gap = percent_gap(subject.living_area_sqm, comp.get("living_area_sqm"))
-        if gap is None:
-            return 0
-        max_points = (
-            SCORING.apartment_surface_points
-            if subject.property_type == "appartement"
-            else SCORING.house_surface_points
-        )
-        if gap <= 0.10:
-            return max_points
-        if gap <= 0.20:
-            return max_points * 0.75
-        if gap <= 0.35:
-            return max_points * 0.5
-        if gap <= 0.50:
-            return max_points * 0.25
-        if gap <= 0.70:
-            return max_points * 0.10
-        return 0
-
-    def _score_land(self, subject: SubjectProperty, comp: Dict[str, Any]) -> float:
-        gap = percent_gap(subject.land_area_sqm, comp.get("land_area_sqm"))
-        if gap is None:
-            return 0
-        if gap <= 0.20:
-            return SCORING.land_points
-        if gap <= 0.40:
-            return 7
-        if gap <= 0.70:
-            return 3
-        return 0
-
-    def _score_freshness(
-        self,
-        comp: Dict[str, Any],
-        reference_date: Optional[date] = None,
-    ) -> float:
-        sale_date = comp.get("sale_or_listing_date")
-        if sale_date is None:
-            return 0
-        anchor_date = reference_date or date.today()
-        days = (anchor_date - sale_date).days
-        if days < 0:
-            return 0
-        if days <= 183:
-            return 10
-        if days <= 365:
-            return 8
-        if days <= 730:
-            return 5
-        if days <= 1095:
-            return 2
-        return 0
-
-    def _is_same_street(self, subject: SubjectProperty, comp: Dict[str, Any]) -> bool:
-        street_name = comp.get("street_name")
-        if not street_name:
-            return False
-        subject_street = self._normalize_street(subject.normalized_address)
-        comp_street = self._normalize_street(street_name)
-        return bool(subject_street and comp_street and subject_street == comp_street)
+        return records
 
     @staticmethod
-    def _normalize_street(value: str) -> str:
-        text = value.lower()
-        for prefix in ("rue ", "avenue ", "av ", "boulevard ", "bd ", "place "):
-            if text.startswith(prefix):
-                text = text[len(prefix):]
-                break
-        return " ".join(text.split())
+    def _record_key(record: Dict[str, Any]) -> str:
+        props = record.get("properties", record)
+        explicit_id = props.get("idmutation") or props.get("idmutinvar") or props.get("idnatmut")
+        if explicit_id:
+            return str(explicit_id)
 
-
-# -----------------------------------------------------------------------------
-# Pipeline
-# -----------------------------------------------------------------------------
+        longitude, latitude = _geometry_center(record.get("geometry", {}))
+        fallback_parts = [
+            str(props.get("datemut") or props.get("date_mutation") or ""),
+            str(props.get("valeurfonc") or props.get("valeur_fonciere") or ""),
+            str(props.get("sbati") or props.get("surface_reelle_bati") or ""),
+            str(props.get("sterr") or props.get("surface_terrain") or ""),
+            str(longitude or ""),
+            str(latitude or ""),
+        ]
+        return "|".join(fallback_parts)
 
 
 class ComparablePipeline:
@@ -673,6 +631,7 @@ class ComparablePipeline:
             longitude=geo["longitude"],
             city=geo.get("city"),
             postcode=geo.get("postcode"),
+            street_name=geo.get("street_name"),
             property_type=payload.property_type,
             living_area_sqm=payload.living_area_sqm,
             rooms=payload.rooms,
@@ -691,53 +650,78 @@ class ComparablePipeline:
             api_min_year=payload.api_min_year,
         )
 
-        comparables: List[Dict[str, Any]] = []
+        eligible_comparables: List[Dict[str, Any]] = []
         for raw in raw_records:
             comp = self._normalize_record(raw, subject)
             if comp is None:
+                continue
+            distance_m = comp.get("distance_m")
+            if distance_m is not None and distance_m > payload.search_radius_m:
                 continue
             comp["similarity_score"] = self.scorer.score(
                 subject,
                 comp,
                 reference_date=valuation_date,
             )
-            comp["retained"] = len(comparables) < MAX_RETAINED_COMPARABLES
-            comparables.append(comp)
+            eligible_comparables.append(comp)
 
-        retained_prices = [
-            c["Prix par m²"]
-            for c in comparables
-            if c["retained"] and c.get("Prix par m²") is not None
+        eligible_prices = [
+            comp["price_per_sqm_eur"]
+            for comp in eligible_comparables
+            if comp.get("price_per_sqm_eur") is not None
         ]
-        returned_comparables = []
-        for comp in comparables:
-            returned_comp = {}
-            for key, value in comp.items():
-                if key in {
-                    "source",
-                    "source_record_id",
-                    "city",
-                    "latitude",
-                    "longitude",
-                    "postcode",
-                    "street_name",
-                    "Type propriété",
-                }:
-                    continue
-                if key in {"Prix de vente", "Prix par m²", "distance", "living_area_sqm", "land_area_sqm","terrain extérieur", "Surface habitable"}:
-                    returned_comp[key] = format_french_number(value)
-                else:
-                    returned_comp[key] = value
-            returned_comparables.append(returned_comp)
+        local_median_price_per_sqm = median(eligible_prices)
+
+        for comp in eligible_comparables:
+            comp["similarity_score"] = round(
+                float(comp.get("similarity_score") or 0)
+                + self.scorer.price_per_sqm_bonus(
+                    subject,
+                    comp,
+                    local_median_price_per_sqm=local_median_price_per_sqm,
+                ),
+                2,
+            )
+            comp["similarity_score"] = round(
+                float(comp.get("similarity_score") or 0)
+                + self.scorer.price_per_sqm_penalty(
+                    comp,
+                    local_median_price_per_sqm=local_median_price_per_sqm,
+                ),
+                2,
+            )
+
+        eligible_comparables = self._deduplicate_same_address_keep_highest_price(eligible_comparables)
+        sorted_comparables = self._sort_comparables(eligible_comparables)
+        retained_comparables = self._select_comparables(subject, sorted_comparables)
+        retained_ids = {id(comp) for comp in retained_comparables}
+        retained_total_prices = [
+            comp["total_price_eur"]
+            for comp in retained_comparables
+            if comp.get("total_price_eur") is not None
+        ]
+        retained_prices = [
+            comp["price_per_sqm_eur"]
+            for comp in retained_comparables
+            if comp.get("price_per_sqm_eur") is not None
+        ]
+        returned_comparables = [
+            self._format_comparable_for_display(comp, retained=id(comp) in retained_ids)
+            for comp in sorted_comparables
+        ]
+        median_price = median(retained_prices)
 
         return {
             "subject": subject.model_dump(),
             "comparables": returned_comparables,
             "statistics": {
-                "comparables_found": len(comparables),
-                "comparables_retained": sum(1 for c in comparables if c["retained"]),
+                "search_radius_m_used": payload.search_radius_m,
+                "api_min_year_used": payload.api_min_year,
+                "comparables_found": len(eligible_comparables),
+                "comparables_retained": len(retained_comparables),
+                "average_total_price_eur": round(sum(retained_total_prices) / len(retained_total_prices), 2) if retained_total_prices else None,
                 "min_price_per_sqm_eur": min(retained_prices) if retained_prices else None,
-                "median_price_per_sqm_eur": median(retained_prices),
+                "median_price_per_sqm_eur": round(median_price, 2) if median_price is not None else None,
                 "max_price_per_sqm_eur": max(retained_prices) if retained_prices else None,
                 "average_price_per_sqm_eur": round(sum(retained_prices) / len(retained_prices), 2) if retained_prices else None,
             },
@@ -746,33 +730,25 @@ class ComparablePipeline:
     def _normalize_record(self, raw: Dict[str, Any], subject: SubjectProperty) -> Optional[Dict[str, Any]]:
         props = raw.get("properties", raw)
         property_type = self._normalize_property_type(props)
-        if property_type != subject.property_type:
-            return None
-
         living_area = self._to_float(props.get("sbati") or props.get("surface_reelle_bati"))
         land_area = self._to_float(props.get("sterr") or props.get("surface_terrain"))
         total_price = self._to_float(props.get("valeurfonc") or props.get("valeur_fonciere"))
         sale_date = try_parse_date(props.get("datemut") or props.get("date_mutation"))
 
-        if (
-            living_area is None
-            or living_area <= 0
-            or total_price is None
-            or total_price <= 0
-            or sale_date is None
-        ):
+        if sale_date is None:
             return None
-
-        area_gap = percent_gap(subject.living_area_sqm, living_area)
-        if area_gap is None or area_gap > 0.70:
+        if property_type != subject.property_type:
             return None
-
-        if subject.property_type == "maison" and subject.land_area_sqm and land_area:
-            land_gap = percent_gap(subject.land_area_sqm, land_area)
-            if land_gap is not None and land_gap > 1.00:
-                return None
+        valid_living_area = round(living_area, 2) if living_area is not None and living_area > 0 else None
+        valid_total_price = round(total_price, 2) if total_price is not None and total_price > 0 else None
+        price_per_sqm = None
+        if valid_living_area is not None and valid_total_price is not None:
+            price_per_sqm = round(valid_total_price / valid_living_area, 2)
 
         longitude, latitude = _geometry_center(raw.get("geometry", {}))
+        distance_m = None
+        if latitude is not None and longitude is not None:
+            distance_m = haversine_distance_m(subject.latitude, subject.longitude, latitude, longitude)
 
         reverse = {}
         if longitude is not None and latitude is not None:
@@ -789,26 +765,160 @@ class ComparablePipeline:
             ]
             comparable_address = " ".join([p for p in address_parts if p])
 
+        street_name = self._extract_street_name(props, reverse)
+
         return {
-            "source": "DVF+",
-            "source_record_id": str(props.get("idmutation") or props.get("idmutinvar") or ""),
-            "Adresse": comparable_address or None,
-            "street_name": reverse.get("street") or props.get("l_nomv"),
-            "city": reverse.get("city"),
-            "postcode": reverse.get("postcode"),
-            "latitude": latitude,
-            "longitude": longitude,
-            "Type propriété": property_type,
-            "Type de bien": props.get("libtypbien") or props.get("type_local"),
-            "Surface habitable": round(living_area, 2),
-            "Pièces": self._extract_rooms(props, property_type),
-            "Terrain extérieur": round(land_area, 2) if land_area is not None else None,
-            "Date de vente": sale_date,
-            "Prix de vente": round(total_price, 2),
-            "Prix par m²": round(total_price / living_area, 2),
-            "distance": None,
-            "raw": raw,
+            "address": comparable_address or None,
+            "property_type": property_type,
+            "property_label": props.get("libtypbien") or props.get("type_local") or (property_type.title() if property_type else "Inconnu"),
+            "living_area_sqm": valid_living_area,
+            "rooms": self._extract_rooms(props, property_type),
+            "land_area_sqm": round(land_area, 2) if land_area is not None else None,
+            "sale_date": sale_date,
+            "total_price_eur": valid_total_price,
+            "price_per_sqm_eur": price_per_sqm,
+            "street_name": street_name,
+            "distance_m": round(distance_m, 1) if distance_m is not None else None,
+            "similarity_score": None,
+            "_micro_location_key": normalize_micro_location(street_name),
         }
+
+    def _select_comparables(
+        self,
+        subject: SubjectProperty,
+        comparables: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        rules = COMPARABLE_RULES[subject.property_type]
+        sorted_comparables = self._sort_comparables(comparables)
+
+        selected = self._apply_selection_rules(
+            sorted_comparables,
+            min_score=rules["primary_min_score"],
+            target_count=MAX_RETAINED_COMPARABLES,
+        )
+
+        if len(selected) < MAX_RETAINED_COMPARABLES:
+            selected = self._apply_selection_rules(
+                sorted_comparables,
+                min_score=rules["fallback_min_score"],
+                target_count=MAX_RETAINED_COMPARABLES,
+            )
+
+        return selected
+
+    @staticmethod
+    def _deduplicate_same_address_keep_highest_price(
+        comparables: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        best_by_address: Dict[str, Dict[str, Any]] = {}
+        without_address: List[Dict[str, Any]] = []
+
+        for comp in comparables:
+            address = comp.get("address")
+            if not address:
+                without_address.append(comp)
+                continue
+
+            address_key = _normalize_address_text(str(address))
+            if not address_key:
+                without_address.append(comp)
+                continue
+
+            current_best = best_by_address.get(address_key)
+            if current_best is None or ComparablePipeline._is_better_same_address_candidate(comp, current_best):
+                best_by_address[address_key] = comp
+
+        return list(best_by_address.values()) + without_address
+
+    @staticmethod
+    def _is_better_same_address_candidate(
+        candidate: Dict[str, Any],
+        reference: Dict[str, Any],
+    ) -> bool:
+        candidate_price = candidate.get("total_price_eur") or 0
+        reference_price = reference.get("total_price_eur") or 0
+        if candidate_price != reference_price:
+            return candidate_price > reference_price
+
+        candidate_score = candidate.get("similarity_score") or 0
+        reference_score = reference.get("similarity_score") or 0
+        if candidate_score != reference_score:
+            return candidate_score > reference_score
+
+        candidate_date = candidate.get("sale_date")
+        reference_date = reference.get("sale_date")
+        if candidate_date and reference_date and candidate_date != reference_date:
+            return candidate_date > reference_date
+
+        candidate_distance = candidate.get("distance_m")
+        reference_distance = reference.get("distance_m")
+        if candidate_distance is None:
+            return False
+        if reference_distance is None:
+            return True
+        return candidate_distance < reference_distance
+
+    @staticmethod
+    def _sort_comparables(comparables: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return sorted(
+            comparables,
+            key=lambda comp: (
+                -(comp.get("similarity_score") or 0),
+                -(comp["sale_date"].toordinal() if comp.get("sale_date") else 0),
+                comp.get("distance_m") if comp.get("distance_m") is not None else float("inf"),
+            ),
+        )
+
+    def _apply_selection_rules(
+        self,
+        comparables: List[Dict[str, Any]],
+        *,
+        min_score: int,
+        target_count: int = MAX_RETAINED_COMPARABLES,
+    ) -> List[Dict[str, Any]]:
+        selected: List[Dict[str, Any]] = []
+
+        for comp in comparables:
+            if len(selected) >= target_count:
+                break
+            if (comp.get("similarity_score") or 0) < min_score:
+                continue
+
+            selected.append(comp)
+
+        return selected
+
+    def _format_comparable_for_display(self, comp: Dict[str, Any], *, retained: bool) -> Dict[str, Any]:
+        return {
+            "Retenu": "Oui" if retained else "Non",
+            "Score": format_french_number(comp.get("similarity_score")),
+            "Adresse": comp.get("address"),
+            "Type de bien": comp.get("property_label"),
+            "Surface habitable": format_french_number(comp.get("living_area_sqm")),
+            "Pièces": comp.get("rooms"),
+            "Terrain extérieur": format_french_number(comp.get("land_area_sqm")),
+            "Date de vente": comp["sale_date"].strftime("%d/%m/%Y") if comp.get("sale_date") else None,
+            "Distance (m)": format_french_number(comp.get("distance_m")),
+            "Prix de vente": format_french_number(comp.get("total_price_eur")),
+            "Prix par m²": format_french_number(comp.get("price_per_sqm_eur")),
+        }
+
+    @staticmethod
+    def _extract_street_name(raw: Dict[str, Any], reverse: Dict[str, Any]) -> Optional[str]:
+        for value in (
+            reverse.get("street"),
+            raw.get("l_nomv"),
+            raw.get("l_noma"),
+            raw.get("nomvoie"),
+            raw.get("lieudit"),
+            raw.get("localite"),
+        ):
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                return text
+        return None
 
     @staticmethod
     def _normalize_property_type(raw: Dict[str, Any]) -> Optional[str]:
@@ -969,7 +1079,7 @@ def render_real_estate_tab():
         search_radius_m = st.number_input(
             "Rayon de recherche (~m)",
             min_value=50,
-            max_value=2000,
+            max_value=5000,
             value=DEFAULT_SEARCH_RADIUS_M,
             step=25,
             key="immo_search_radius_m",
@@ -1049,18 +1159,15 @@ def render_real_estate_tab():
         <h3><span class="step-number">3</span> Bien cible</h3>
     </div>
     """, unsafe_allow_html=True)
-    st.json(result["subject"])
+    st.dataframe(
+        build_subject_display_rows(result["subject"]),
+        use_container_width=True,
+        hide_index=True,
+    )
 
     st.markdown("""
     <div class="step-card">
-        <h3><span class="step-number">4</span> Statistiques</h3>
-    </div>
-    """, unsafe_allow_html=True)
-    st.json(result["statistics"])
-
-    st.markdown("""
-    <div class="step-card">
-        <h3><span class="step-number">5</span> Comparables</h3>
+        <h3><span class="step-number">4</span> Comparables</h3>
     </div>
     """, unsafe_allow_html=True)
 
@@ -1069,4 +1176,5 @@ def render_real_estate_tab():
         st.warning("Aucun comparable trouvé. Vérifie le branchement DVF.")
         return
 
-    st.dataframe(comps, use_container_width=True)
+    display_comps = append_comparables_summary_row(comps, result.get("statistics", {}))
+    st.dataframe(display_comps, use_container_width=True, hide_index=True)

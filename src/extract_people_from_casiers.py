@@ -1,7 +1,6 @@
 import argparse
 import json
 import logging
-import os
 import re
 import sys
 import time
@@ -14,9 +13,11 @@ if str(_SRC_DIR) not in sys.path:
 
 from normalization import (
     canonical_name,
+    extract_person_folder,
     is_archived_path,
 )
 from runtime_config import configure_environment
+from llm_client import get_llm_client
 
 ROOT_DIR = _SRC_DIR.parent.resolve()
 configure_environment(ROOT_DIR)
@@ -26,94 +27,13 @@ OUTPUT_DIR = ROOT_DIR / "output"
 
 
 # ---------------------------------------------------------------------------
-# LLM client
-# ---------------------------------------------------------------------------
-def _get_llm_client():
-    openai_key = os.environ.get("OPENAI_API_KEY")
-    gemini_key = os.environ.get("GEMINI_API_KEY")
-
-    if openai_key:
-        from openai import OpenAI
-
-        client = OpenAI(api_key=openai_key)
-        model = "gpt-4o-mini"
-
-        def call(prompt: str) -> str:
-            response = client.chat.completions.create(
-                model=model,
-                temperature=0,
-                response_format={"type": "json_object"},
-                messages=[{"role": "user", "content": prompt}],
-            )
-            return response.choices[0].message.content
-
-        logger.info(f"LLM: OpenAI ({model})")
-        return call, model
-
-    if gemini_key:
-        from google import genai
-
-        client = genai.Client(api_key=gemini_key)
-        model = "gemini-2.5-flash-lite"
-
-        def call(prompt: str) -> str:
-            response = client.models.generate_content(
-                model=model,
-                contents=prompt,
-                config={
-                    "temperature": 0,
-                    "response_mime_type": "application/json",
-                },
-            )
-            return response.text
-
-        logger.info(f"LLM: Gemini ({model})")
-        return call, model
-
-    raise ValueError("Aucune clé API trouvée. Ajoute OPENAI_API_KEY ou GEMINI_API_KEY dans .env")
-
-
-# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-# Rétro-compat : ancienne API interne toujours alias vers la version partagée.
-_normalize = canonical_name
-
-
 def _normalize_identity_part(text: str) -> str:
     return re.sub(r"[^a-z0-9]", "", canonical_name(text))
 
 
-def _is_old_source_path(source_path: str) -> bool:
-    return is_archived_path(source_path)
 
-
-_RH_CANON_ALIASES = {"rh", "ressources humaines"}
-
-
-def _extract_person_folder_from_source_path(source_path: str) -> Optional[str]:
-    """Nom du sous-dossier personne sous RH. Matching flexible sur le libellé RH."""
-    if not source_path or is_archived_path(source_path):
-        return None
-
-    raw_parts = [p for p in source_path.replace("\\", "/").split("/") if p]
-    canon_parts = [canonical_name(p) for p in raw_parts]
-
-    rh_idx = next(
-        (i for i, p in enumerate(canon_parts) if p in _RH_CANON_ALIASES),
-        None,
-    )
-    if rh_idx is None:
-        return None
-
-    # Il faut un sous-dossier de RH + un fichier dedans
-    if rh_idx + 1 >= len(raw_parts) - 1:
-        return None
-
-    candidate = raw_parts[rh_idx + 1]
-    if is_archived_path(candidate):
-        return None
-    return candidate
 
 
 def _fuzzy_word_match(word: str, target: str, threshold: float = 0.78) -> bool:
@@ -124,7 +44,7 @@ def _fuzzy_word_match(word: str, target: str, threshold: float = 0.78) -> bool:
 
 
 def _is_casier_judiciaire_filename(filename: str) -> bool:
-    norm = _normalize(filename)
+    norm = canonical_name(filename)
     words = norm.split()
 
     has_casier = any(_fuzzy_word_match(w, "casier") for w in words)
@@ -254,7 +174,9 @@ def extract_people_from_project(project_id: str) -> Dict[str, List[dict]]:
         raise FileNotFoundError(f"Dossier documents introuvable : {docs_dir}")
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    call_llm, model_name = _get_llm_client()
+    _client = get_llm_client(model_override={"openai": "gpt-4o-mini", "gemini": "gemini-2.5-flash-lite"})
+    call_llm = _client["text_call"]
+    model_name = _client["model"]
     logger.info(f"Extraction personnes casiers pour {project_id} avec {model_name}")
 
     candidate_docs: List[Tuple[dict, str]] = []
@@ -263,10 +185,10 @@ def extract_people_from_project(project_id: str) -> Dict[str, List[dict]]:
         filename = doc_info.get("filename", "")
         source_path = doc_info.get("source_path", "")
 
-        if _is_old_source_path(source_path):
+        if is_archived_path(source_path):
             continue
 
-        person_folder = _extract_person_folder_from_source_path(source_path)
+        person_folder = extract_person_folder(source_path)
         if not person_folder:
             continue
 
