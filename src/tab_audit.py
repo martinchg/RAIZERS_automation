@@ -414,6 +414,14 @@ def render_audit_tab():
         run_fill = st.toggle("Generer Excel", value=True)
         send_email = st.toggle("Envoyer par email", value=False)
 
+    col_op, col_pat, col_fin = st.columns(3)
+    with col_op:
+        run_operateur = st.toggle("Opérateur", value=True)
+    with col_pat:
+        run_patrimoine = st.toggle("Patrimoine", value=True)
+    with col_fin:
+        run_financiers = st.toggle("Financiers", value=True)
+
     email_to = ""
     if send_email:
         email_to = st.text_input("Email de notification", placeholder="prenom@raizers.com")
@@ -520,7 +528,12 @@ def render_audit_tab():
                 status.update(label="Extraction LLM...")
                 st.write("**Extraction LLM** en cours...")
                 from extract_structured import run as run_extraction
-                run_extraction(project_id)
+                run_extraction(
+                    project_id,
+                    include_operateur=run_operateur,
+                    include_patrimoine=run_patrimoine,
+                    include_financiers=run_financiers,
+                )
 
                 results_path = project_dir / "extraction_results.json"
                 if results_path.exists():
@@ -607,9 +620,15 @@ def render_audit_tab():
                         mandats_data = json.loads(mandats_path.read_text(encoding="utf-8"))
                         pappers_mandats = mandats_data.get("societes_par_personne")
 
+                    _source_enabled = {
+                        "operateur": run_operateur,
+                        "patrimoine": run_patrimoine,
+                        "finance": run_financiers,
+                    }
                     fields = [
                         f for f in questions_data["fields"]
                         if isinstance(f, dict) and f.get("field_id")
+                        and _source_enabled.get(f.get("_source"), True)
                     ]
                     excel_path = fill_excel(
                         results=extraction_data["results"],

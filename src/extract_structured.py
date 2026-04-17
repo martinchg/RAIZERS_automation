@@ -82,7 +82,12 @@ def _is_per_company_field(field: Dict) -> bool:
     return field.get("excel_sheet") == "{company_name}"
 
 
-def run(project_id: str):
+def run(
+    project_id: str,
+    include_operateur: bool = True,
+    include_patrimoine: bool = True,
+    include_financiers: bool = True,
+):
     project_dir = OUTPUT_DIR / project_id
     manifest_path = project_dir / "manifest.json"
     docs_dir = project_dir / "documents"
@@ -96,8 +101,15 @@ def run(project_id: str):
 
     questions_config = load_questions_config(ROOT_DIR / "config")
 
+    _source_enabled = {
+        "operateur": include_operateur,
+        "patrimoine": include_patrimoine,
+        "finance": include_financiers,
+    }
     all_fields = [
-        field for field in questions_config["fields"] if isinstance(field, dict) and field.get("field_id")
+        field for field in questions_config["fields"]
+        if isinstance(field, dict) and field.get("field_id")
+        and _source_enabled.get(field.get("_source"), True)
     ]
     selected_audit_folder = manifest.get("selected_audit_folder")
 

@@ -49,6 +49,10 @@ def load_questions_config(config_dir: Path, explicit_path: Optional[str] = None)
             raise ValueError(f"Format invalide dans {question_file}: 'fields' doit etre une liste")
 
         source_files.append(str(question_file))
+        # derive a short source tag from the filename (e.g. "operateur", "patrimoine", "finance")
+        stem = question_file.stem  # e.g. "questions_operateur"
+        source_tag = stem.split("_", 1)[1] if "_" in stem else stem
+
         for field in fields:
             if not isinstance(field, dict) or not field.get("field_id"):
                 continue
@@ -59,6 +63,8 @@ def load_questions_config(config_dir: Path, explicit_path: Optional[str] = None)
                     f"field_id duplique '{field_id}' entre {first_file.name} et {question_file.name}"
                 )
             seen_field_ids[field_id] = question_file
+            field = dict(field)
+            field.setdefault("_source", source_tag)
             merged_fields.append(field)
 
     return {
