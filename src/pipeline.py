@@ -57,41 +57,37 @@ OPERATEUR_PATTERNS = ["operateur", "*operateur", "operateur*", "*operateur*"]
 
 PIPELINE_ALWAYS_KEEP_HINTS = {
     "kbis",
-    "statut",
-    "statuts",
     "contrat obligataire",
     "contrat",
     "garantie",
     "hypotheque",
     "promesse de vente",
-    "compromis",
-    "pv",
-    "proces verbal",
-    "devis",
     "bilan",
     "comptes annuels",
     "liasse fiscale",
     "etats financiers",
+    "ef",
     "attestation patrimoniale",
     "fiche patrimoniale",
     "patrimoniale",
     "casier judiciaire",
     "extrait de casier",
-    "bulletin n3",
-    "bulletin numero 3",
     "avis d impot",
-    "planning",
     "track record",
+    "lots"
+    "grille de lots",
+    "grille lots",
+    "commercialisation",
+    "offre"
+    "grille de prix",
 }
 PIPELINE_AUDIT_FOLDER_HINTS = {
     "acquisition",
-    "garantie",
     "garanties",
-    "hypotheque",
-    "construction",
-    "travaux",
+    "rh",
     "elements techniques",
     "elements financiers",
+    "commercialisation",
 }
 
 # ---------------------------------------------------------------------------
@@ -127,7 +123,7 @@ def write_jsonl(path: Path, records: List[dict]):
     with open(path, "w", encoding="utf-8") as f:
         for rec in records:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-    logger.info(f"  📝 {path.name}: {len(records)} lignes")
+    logger.info(f"  {path.name}: {len(records)} lignes")
 
 
 
@@ -341,7 +337,7 @@ def prefilter_files_for_extraction(
         skipped_by_prefilter += 1
 
     logger.info(
-        "  🎯 Préfiltrage pipeline : %s/%s fichier(s) gardé(s), %s ignoré(s)",
+        "  Préfiltrage pipeline : %s/%s fichier(s) gardé(s), %s ignoré(s)",
         len(relevant_files),
         len(manually_filtered),
         skipped_by_prefilter,
@@ -700,7 +696,7 @@ def run(project_path: str, selected_audit_folder: Optional[str] = None):
         local_dir=str(LOCAL_CACHE),
         dbx=dbx,
     )
-    logger.info(f"  📥 {len(downloaded)} fichier(s)")
+    logger.info(f" {len(downloaded)} fichier(s)")
 
     relative_project = project_path.strip("/")
     project_local_root = LOCAL_CACHE / relative_project
@@ -718,7 +714,7 @@ def run(project_path: str, selected_audit_folder: Optional[str] = None):
             and _is_path_within(p, project_local_root)
         }
     )
-    logger.info(f"  📂 {len(discovered_files)} fichier(s) trouvé(s)")
+    logger.info(f" {len(discovered_files)} fichier(s) trouvé(s)")
 
     scoped_files, selected_audit_folder_name = filter_audit_files(
         discovered_files,
@@ -737,7 +733,7 @@ def run(project_path: str, selected_audit_folder: Optional[str] = None):
         )
     else:
         logger.info(
-            "  🎯 Préfiltrage pipeline désactivé : %s fichier(s) gardé(s) dans le scope",
+            "  Préfiltrage pipeline désactivé : %s fichier(s) gardé(s) dans le scope",
             len(all_files),
         )
 
@@ -814,7 +810,7 @@ def run(project_path: str, selected_audit_folder: Optional[str] = None):
             })
 
             logger.info(
-                "    ✅ %s parent(s), %s ignoré(s), %s tok, %.2fs",
+                "    DONE - %s parent(s), %s ignoré(s), %s tok, %.2fs",
                 len(parents),
                 skipped,
                 doc_tokens,
@@ -868,7 +864,7 @@ def run(project_path: str, selected_audit_folder: Optional[str] = None):
 
     logger.info("=" * 60)
     logger.info(
-        f"✅ {len(all_parents)} parents ({total_tokens:,} tok) | "
+        f" DONE - {len(all_parents)} parents ({total_tokens:,} tok) | "
         f"{len(parents_by_doc)} documents | {total_skipped} filtrés"
     )
     logger.info(f"   Output : {project_out}")

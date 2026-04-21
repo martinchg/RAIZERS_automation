@@ -1,9 +1,11 @@
 {
-  "_description": "Champs à extraire des documents projet pour remplir le tableau Excel Book1.xlsx",
+  "_description": "États financiers des sociétés (bilan actif/passif, compte de résultat) — alimente un onglet par société '{company_name}' dans le fichier Excel. Source : liasses fiscales, bilans, comptes annuels.",
   "_notes": [
-    "MODE TEST COUT REDUIT : uniquement les champs bilan / compte de résultat.",
-    "Le LLM recopie les lignes telles quelles depuis le document. Le mapping vers les clés canoniques est fait en Python.",
-    "Format de sortie : array de {poste, n, n1} — le LLM lit, Python classifie."
+    "hint_keywords : mots-clés dans le filename ou source_path pour matcher le document. Matching canonique : casse/accents/préfixes numériques ignorés.",
+    "source_dirs : le doc doit avoir sa source_path contenant l'un de ces dossiers en sous-séquence. {selected_audit_folder} est résolu à runtime.",
+    "Le LLM retourne les postes directement classés dans les clés métier autorisées (liste dans chaque question). Le mapping fin vers les clés canoniques est géré en Python (financial_mapping.py).",
+    "Format de sortie des tables : array de {key, poste_source, n, n1} — N = exercice le plus récent, N-1 = exercice précédent.",
+    "excel_sheet : '{company_name}' = un onglet par société. Les champs bilan vont dans l'onglet bilan, compte de résultat dans son propre onglet."
   ],
   "fields": [
     {

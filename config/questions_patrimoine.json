@@ -1,12 +1,12 @@
 {
-  "_description": "Champs à extraire des documents projet pour remplir le tableau Excel Book1.xlsx",
+  "_description": "Situation patrimoniale des personnes physiques (dirigeants, garants) — alimente un onglet par personne '{person_name}' dans le fichier Excel. Source : attestations et fiches patrimoniales.",
   "_notes": [
-    "hint_keywords = mots-clés à chercher dans le filename/source_path pour matcher le document (matching canonique : casse/accents/préfixes numériques ignorés).",
-    "source_dirs = dossiers sources acceptés (le doc DOIT avoir sa source_path contenant l'un de ces dossiers comme sous-séquence de segments). Matching canonique tolérant : '*Audit', 'Audit 1', 'audit' s'équivalent. Les préfixes numériques ('0. ', '1. ', 'X. ') sont ignorés. Supporte {selected_audit_folder} = dossier d'audit choisi (résolu à runtime depuis le manifest).",
-    "source_doc_name = nom du document source (sans chemin complet). Permet de matcher par nom de fichier seul.",
-    "context_hint = contexte métier envoyé au LLM pour l'aider à distinguer les infos",
-    "excel_sheet = nom de l'onglet Excel. Pour les champs patrimoine, '{person_name}' = placeholder, le pipeline crée un onglet par personne.",
-    "type = 'string' pour valeur simple, 'table' pour données tabulaires (array d'objets JSON). Pour type 'table', excel_cell_start = première cellule de données, column_mapping = colonnes Excel par clé."
+    "hint_keywords : mots-clés dans le filename ou source_path pour matcher le document. Matching canonique : casse/accents/préfixes numériques ('1. ', '2. ') ignorés.",
+    "source_dirs : le doc doit avoir sa source_path contenant l'un de ces dossiers en sous-séquence. Tolérant : '*Audit', 'Audit 1', 'audit' s'équivalent. {selected_audit_folder} est résolu à runtime.",
+    "source_doc_name_variants : noms de fichier typiques permettant de matcher par nom seul (sans chemin).",
+    "context_hint : contexte métier transmis au LLM pour l'aider à identifier la bonne information dans le document.",
+    "excel_sheet : '{person_name}' = placeholder, le pipeline crée un onglet par personne détectée dans les documents patrimoniaux.",
+    "type : 'string' = valeur simple | 'table' = array d'objets JSON (excel_cell_start = première cellule de données)."
   ],
   "fields": [
     {
@@ -69,7 +69,7 @@
     {
       "field_id": "patrimoine_immobilier_table",
       "label": "Tableau du patrimoine immobilier",
-      "question": "Extrais le tableau complet du patrimoine immobilier en detail. Les infos doivent venir uniquement du tableau patrimoine immobilier. Pour chaque bien, retourne un objet JSON avec les clés suivantes : type_detention (type de bien en y ajoutant la surface si elle est présente, par exemple 'Maison - 73 m²', 'Appartement - 45 m²', 'Immeuble - 210 m²', sinon retourne seulement le type de bien), pct_detention (pourcentage de détention, en pourcentage suivi de %), adresse (adresse complète + destination : RP=Résidence Principale, RS=Résidence Secondaire, RL=Résidence Locative), valeur_bien (valeur à trouver dans 'estimation actuelle du bien', nombre sans €), valeur_banque (valeur à trouver dans 'capital restant dû' , nombre sans €, sinon null), revenus_locatifs (revenus annuels si locatif ou fonciers, à trouver dans le tableau patrimoine immobilier ou le tableau revenus de type fonciser ou immobilier ou loyers, nombre seul sans €, sinon null), garanties_donnees (CP=Caution personnelle, GAPD=Garantie à première demande, HP=Hypothèque, PPD=Privilège de prêteur de deniers, NANT=nantissement, FD=Fiducie...). Retourne un array JSON de ces objets.",
+      "question": "Extrais le tableau complet du patrimoine immobilier en detail. Les infos doivent venir uniquement du tableau patrimoine immobilier. Pour chaque bien, retourne un objet JSON avec les clés suivantes : type_detention (type de bien en y ajoutant la surface si elle est présente, par exemple 'Maison - 73 m²', 'Appartement - 45 m²', 'Immeuble - 210 m²', sinon retourne seulement le type de bien), pct_detention (pourcentage de détention, en pourcentage suivi de %), adresse (adresse complète + destination : RP=Résidence Principale, RS=Résidence Secondaire, RL=Résidence Locative), valeur_bien (valeur à trouver dans 'estimation actuelle du bien', nombre sans €), valeur_banque (valeur à trouver dans 'capital restant dû', nombre sans €, sinon null), revenus_locatifs (revenus locatifs, nombre sans €, convertis toujours en montant ANNUEL, 0 si non locatif, null si absent), periode_revenus (période des revenus si explicitement mentionnée : 'M' si mensuel, 'A' si annuel, null si non mentionné ou non locatif), garanties_donnees (CP=Caution personnelle, GAPD=Garantie à première demande, HP=Hypothèque, PPD=Privilège de prêteur de deniers, NANT=nantissement, FD=Fiducie...). Retourne un array JSON de ces objets.",
       "excel_cell_start": "B9",
       "excel_sheet": "{person_name}",
       "type": "table",
@@ -80,10 +80,11 @@
         "valeur_bien": "E",
         "valeur_banque": "F",
         "revenus_locatifs": "H",
-        "garanties_donnees": "I"
+        "periode_revenus": "I",
+        "garanties_donnees": "J"
       },
       "format_hint": "Array JSON d'objets, un par bien immobilier",
-      "context_hint": "Le tableau patrimoine immobilier liste tous les biens détenus par la personne. Si la surface du bien est présente dans le tableau, ajoute-la directement dans la valeur de type_detention au format 'Type - surface m²'. Les valeurs monétaires sont des nombres sans €. La colonne G (valeur nette détenue) est calculée par formule Excel = (E-F)*C, ne pas la remplir.",
+      "context_hint": "Le tableau patrimoine immobilier liste tous les biens détenus par la personne. Les valeurs monétaires sont des nombres sans €. La colonne G (valeur nette détenue) est calculée par formule Excel = (E-F)*C, ne pas la remplir.",
       "source_doc_name_variants": [
         "attestation patrimoniale",
         "attestation patrimoniale completee"
@@ -100,7 +101,7 @@
         "attestation patrimoniale completee",
         "fiche de renseignements patrimoniale",
         "fiche patrimoniale raizers",
-        "fiche patrimoniale" 
+        "fiche patrimoniale"
       ]
     }
   ]

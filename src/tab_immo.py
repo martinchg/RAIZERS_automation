@@ -12,6 +12,7 @@ import requests
 import streamlit as st
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
+from immo_ml import annotate_price_outliers, local_price_coherence_score
 from immo_scoring import (
     ComparableScorer,
     PropertyType,
@@ -36,6 +37,7 @@ DVF_MONTH_WINDOW = 20
 DVF_PAGE_SIZE = 100
 DEFAULT_SEARCH_BBOX_DELTA = 0.002
 DEFAULT_SEARCH_RADIUS_M = int(round(DEFAULT_SEARCH_BBOX_DELTA * 111320))
+ML_PRICE_COHERENCE_BONUS_MAX = 15.0
 
 
 # -----------------------------------------------------------------------------
@@ -663,6 +665,23 @@ class ComparablePipeline:
                 ),
                 2,
             )
+            comp["ml_price_coherence_score"] = round(
+                local_price_coherence_score(
+                    comp,
+                    local_median_price_per_sqm=local_median_price_per_sqm,
+                ),
+                3,
+            )
+            comp["similarity_score"] = round(
+                float(comp.get("similarity_score") or 0)
+                + comp["ml_price_coherence_score"] * ML_PRICE_COHERENCE_BONUS_MAX,
+                2,
+            )
+
+        eligible_comparables = annotate_price_outliers(eligible_comparables)
+        for comp in eligible_comparables:
+            if comp.get("ml_is_outlier"):
+                comp["similarity_score"] = round(float(comp.get("similarity_score") or 0) - 25.0, 2)
 
         sorted_comparables = self._sort_comparables(eligible_comparables)
         retained_comparables = self._select_comparables(subject, sorted_comparables)
@@ -690,6 +709,8 @@ class ComparablePipeline:
                 "search_radius_m_used": payload.search_radius_m,
                 "api_min_year_used": payload.api_min_year,
                 "comparables_found": len(eligible_comparables),
+                "comparables_after_outlier_filter": len([comp for comp in eligible_comparables if not comp.get("ml_is_outlier")]),
+                "outliers_detected": len([comp for comp in eligible_comparables if comp.get("ml_is_outlier")]),
                 "comparables_retained": len(retained_comparables),
                 "average_total_price_eur": round(sum(retained_total_prices) / len(retained_total_prices), 2) if retained_total_prices else None,
                 "min_price_per_sqm_eur": min(retained_prices) if retained_prices else None,
@@ -751,7 +772,9 @@ class ComparablePipeline:
         subject: SubjectProperty,
         comparables: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        return self._sort_comparables(comparables)[:MAX_RETAINED_COMPARABLES]
+        non_outliers = [comp for comp in comparables if not comp.get("ml_is_outlier")]
+        pool = non_outliers or comparables
+        return self._sort_comparables(pool)[:MAX_RETAINED_COMPARABLES]
 
     @staticmethod
     def _sort_comparables(comparables: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -767,7 +790,9 @@ class ComparablePipeline:
     def _format_comparable_for_display(self, comp: Dict[str, Any], *, retained: bool) -> Dict[str, Any]:
         return {
             "Retenu": "Oui" if retained else "Non",
+            "Outlier": "Oui" if comp.get("ml_is_outlier") else "Non",
             "Score": format_french_number(comp.get("similarity_score")),
+            "Cohérence prix ML": format_french_number(comp.get("ml_price_coherence_score")),
             "Adresse": comp.get("address"),
             "Type de bien": comp.get("property_label"),
             "Surface habitable": format_french_number(comp.get("living_area_sqm")),

@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import streamlit as st
+from PIL import Image
 
 # Setup paths
 ROOT_DIR = Path(__file__).parent.resolve()
@@ -55,7 +56,7 @@ USER_AGENT = "comparateur-immo-streamlit/0.1"
 # UI
 # ---------------------------------------------------------------------------
 
-st.set_page_config(page_title="RAIZERS Audit", page_icon="📊", layout="centered")
+st.set_page_config(page_title="RAIZERS Audit", page_icon=Image.open(ROOT_DIR / "assets" / "R.png"), layout="centered")
 
 def _load_background_data_url(path: Path) -> str:
     if not path.exists():

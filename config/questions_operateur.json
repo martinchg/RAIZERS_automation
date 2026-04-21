@@ -1,12 +1,12 @@
 {
-  "_description": "Champs à extraire des documents projet pour remplir le tableau Excel Book1.xlsx",
+  "_description": "Informations générales sur l'opérateur (société emprunteuse, garants, KBis, statuts, dirigeants) — alimente l'onglet 'Opération' du fichier Excel.",
   "_notes": [
-    "hint_keywords = mots-clés à chercher dans le filename/source_path pour matcher le document (matching canonique : casse/accents/préfixes numériques ignorés).",
-    "source_dirs = dossiers sources acceptés (le doc DOIT avoir sa source_path contenant l'un de ces dossiers comme sous-séquence de segments). Matching canonique tolérant : '*Audit', 'Audit 1', 'audit' s'équivalent. Les préfixes numériques ('0. ', '1. ', 'X. ') sont ignorés. Supporte {selected_audit_folder} = dossier d'audit choisi (résolu à runtime depuis le manifest).",
-    "source_doc_name = nom du document source (sans chemin complet). Permet de matcher par nom de fichier seul.",
-    "context_hint = contexte métier envoyé au LLM pour l'aider à distinguer les infos",
-    "excel_sheet = nom de l'onglet Excel. Pour les champs patrimoine, '{person_name}' = placeholder, le pipeline crée un onglet par personne.",
-    "type = 'string' pour valeur simple, 'table' pour données tabulaires (array d'objets JSON). Pour type 'table', excel_cell_start = première cellule de données, column_mapping = colonnes Excel par clé."
+    "hint_keywords : mots-clés dans le filename ou source_path pour matcher le document. Matching canonique : casse/accents/préfixes numériques ('1. ', '2. ') ignorés.",
+    "source_dirs : le doc doit avoir sa source_path contenant l'un de ces dossiers en sous-séquence. Tolérant : '*Audit', 'Audit 1', 'audit' s'équivalent. {selected_audit_folder} est résolu à runtime.",
+    "source_doc_name_variants : noms de fichier typiques permettant de matcher par nom seul (sans chemin).",
+    "context_hint : contexte métier transmis au LLM pour l'aider à identifier la bonne information dans le document.",
+    "excel_sheet : nom de l'onglet Excel cible. 'Opération' = onglet fixe, '{person_name}' = un onglet par personne, '{company_name}' = un onglet par société.",
+    "type : 'string' = valeur simple | 'table' = array d'objets JSON (excel_cell_start = première cellule de données)."
   ],
   "fields": [
     {
@@ -347,16 +347,14 @@
       "format_hint": null,
       "context_hint": "On veut l'adresse exacte de l'actif financé, pas une localisation approximative. Une réponse du type 'La Teste de Buch' seule n'est pas acceptable. Privilégie les documents de l'opération elle-même : contrat obligataire, promesse, acquisition, commercialisation, devis ou présentation du programme.",
       "source_dirs": [
-        "*Audit/{selected_audit_folder}"
+        "*Audit/{selected_audit_folder}/",
+        "*Audit/*Commercialisation/*Grille de lots",
+        "*Audit/*Commercialisation/*Grille lots"
       ],
       "hint_keywords": [
-        "adresse du projet",
-        "contrat obligataire",
-        "promesse",
-        "acquisition",
-        "devis",
-        "commercialisation",
-        "programme"
+        "lots",
+        "grille de lots",
+        "contrat obligataire"
       ]
     },
     {

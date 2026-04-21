@@ -74,6 +74,18 @@ def needs_broad_financial_context(questions: List[Dict]) -> bool:
     return any(is_financial_field(question) for question in questions)
 
 
+def is_patrimoine_table_field(field: Dict) -> bool:
+    return (
+        field.get("excel_sheet") == "{person_name}"
+        and field.get("type") == "table"
+        and str(field.get("field_id", "")).startswith("patrimoine_")
+    )
+
+
+def needs_patrimoine_table_context(questions: List[Dict]) -> bool:
+    return any(is_patrimoine_table_field(q) for q in questions)
+
+
 def load_filtered_text(
     doc_path: Path,
     questions: List[Dict],

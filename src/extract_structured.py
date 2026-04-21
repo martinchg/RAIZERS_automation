@@ -25,6 +25,7 @@ from extract_structured_documents import (
     load_filtered_text,
     match_questions_to_doc,
     needs_broad_financial_context,
+    needs_patrimoine_table_context,
     resolve_cached_source_file,
     resolve_project_location,
 )
@@ -47,6 +48,7 @@ from financial_mapping import (
     validate_financial_answers,
 )
 from financial_tables_native import extract_financial_data, render_financial_context
+from patrimoine_tables_native import extract_patrimoine_data, render_patrimoine_context
 from llm_client import get_llm_client
 from normalization import canonical_name, extract_person_folder
 from question_config import filter_fields_for_excel_tabs, load_questions_config
@@ -166,6 +168,7 @@ def run(
 
     results: Dict[str, Optional[str]] = {field["field_id"]: None for field in global_fields}
     global_field_ids = {field["field_id"] for field in global_fields}
+    global_field_by_id = {field["field_id"]: field for field in global_fields}
     asked_global_ids: set[str] = set()
     asked_person_keys: set[str] = set()
     asked_company_keys: set[str] = set()
@@ -250,9 +253,12 @@ def run(
         )
 
         native_financial_data: Optional[Dict] = None
+        native_patrimoine_data: Optional[Dict] = None
         native_context = ""
         cached_pdf: Optional[Path] = None
-        if broad_financial_context and str(doc_info.get("file_type", "")).lower() == "pdf":
+        is_pdf = str(doc_info.get("file_type", "")).lower() == "pdf"
+
+        if broad_financial_context and is_pdf:
             cached_pdf = resolve_cached_source_file(manifest, source_path, filename)
             if cached_pdf:
                 try:
@@ -265,6 +271,21 @@ def run(
                     logger.warning("Extraction financiere native indisponible pour %s: %s", filename, exc)
             else:
                 logger.warning("PDF source introuvable dans le cache pour %s", filename)
+
+        if needs_patrimoine_table_context(questions_to_ask) and is_pdf:
+            if cached_pdf is None:
+                cached_pdf = resolve_cached_source_file(manifest, source_path, filename)
+            if cached_pdf:
+                try:
+                    native_patrimoine_data = extract_patrimoine_data(cached_pdf)
+                    native_context += render_patrimoine_context(native_patrimoine_data)
+                    logger.info(
+                        "Extraction patrimoine native: %s lignes (page %s)",
+                        native_patrimoine_data.get("_meta", {}).get("rows_extracted", 0),
+                        native_patrimoine_data.get("pages", {}).get("patrimoine_immobilier"),
+                    )
+                except Exception as exc:
+                    logger.warning("Extraction patrimoine native indisponible pour %s: %s", filename, exc)
 
         doc_text = load_filtered_text(
             doc_path,
@@ -328,6 +349,9 @@ def run(
         quality_report_multimodal: Dict[str, object] = {}
         quality_report_final: Dict[str, object] = {}
         selected_strategy = "text"
+
+        if native_patrimoine_data:
+            answers = merge_native_fallback_answers(answers, native_patrimoine_data, questions_to_ask)
 
         if broad_financial_context:
             answers = merge_native_fallback_answers(answers, native_financial_data, questions_to_ask)
@@ -436,7 +460,11 @@ def run(
                 and _has_meaningful_value(value)
                 and not _has_meaningful_value(results[field_id])
             ):
-                results[field_id] = stringify_non_table_value(value)
+                field_def = global_field_by_id.get(field_id, {})
+                if isinstance(value, list) and field_def.get("type") == "table":
+                    results[field_id] = json.dumps(value, ensure_ascii=False)
+                else:
+                    results[field_id] = stringify_non_table_value(value)
                 found += 1
 
         if matched_person and person_suffix:

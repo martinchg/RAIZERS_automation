@@ -10,6 +10,7 @@ DEFAULT_SPLIT_FILENAMES = (
     "questions_operateur.json",
     "questions_patrimoine.json",
     "questions_finance.json",
+    "questions_lots.json",
 )
 LEGACY_FILENAME = "questions.json"
 SHARED_FINANCIAL_FIELD_IDS = {
@@ -23,6 +24,9 @@ BILAN_FIELD_IDS = {
 }
 COMPTE_RESULTAT_FIELD_IDS = {
     "bilan_compte_resultat_table",
+}
+LOTS_FIELD_IDS = {
+    "lots_table",
 }
 
 
@@ -113,6 +117,9 @@ def field_targets_excel_tabs(field: Dict) -> Set[str]:
             return {"compte_resultat"}
         return {"bilan", "compte_resultat"}
 
+    if field_id in LOTS_FIELD_IDS or excel_sheet == "Commercialisation":
+        return {"lots"}
+
     return {"operation"}
 
 
@@ -123,6 +130,7 @@ def filter_fields_for_excel_tabs(
     include_patrimoine: bool = True,
     include_bilan: bool = True,
     include_compte_resultat: bool = True,
+    include_lots: bool = True,
 ) -> List[Dict]:
     enabled_tabs = set()
     if include_operation:
@@ -133,6 +141,8 @@ def filter_fields_for_excel_tabs(
         enabled_tabs.add("bilan")
     if include_compte_resultat:
         enabled_tabs.add("compte_resultat")
+    if include_lots:
+        enabled_tabs.add("lots")
 
     filtered_fields: List[Dict] = []
     for field in fields:

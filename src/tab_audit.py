@@ -174,6 +174,15 @@ def _send_email(to: str, subject: str, body: str, attachment_path: Path | None =
     return True
 
 
+def _get_smtp_config_status() -> tuple[bool, list[str]]:
+    """Retourne l'etat minimal de configuration SMTP attendue."""
+    missing: list[str] = []
+    for key in ("SMTP_USER", "SMTP_PASS"):
+        if not os.environ.get(key, "").strip():
+            missing.append(key)
+    return (len(missing) == 0, missing)
+
+
 def _load_audit_history() -> list[dict]:
     if not HISTORY_PATH.exists():
         return []
@@ -284,10 +293,10 @@ class StreamlitLogHandler(logging.Handler):
 
 def render_audit_tab():
 
-    # --- Step 1 : Dossier ---
+    # --- Section 1 : Dossier a auditer (projet + sous-dossier) ---
     st.markdown("""
     <div class="step-card">
-        <h3><span class="step-number">1</span> Dossier a auditer</h3>
+        <h3><span class="step-number">1</span> Dossier à auditer</h3>
     </div>
     """, unsafe_allow_html=True)
 
@@ -331,6 +340,7 @@ def render_audit_tab():
     if not st.session_state.dbx_folders:
         _load_projects()
 
+    st.caption("Dossier")
     col1, col2 = st.columns([5, 1])
     if st.session_state.dbx_folders:
         with col1:
@@ -345,20 +355,14 @@ def render_audit_tab():
     else:
         st.warning("Aucun dossier trouve dans Dropbox.")
     with col2:
-        if st.button("\U0001f504", help="Rafraichir la liste"):
+        if st.button("↺", help="Rafraichir la liste"):
             _load_projects()
             st.session_state.pop("audit_subfolders_cache", None)
             st.session_state.pop("selected_audit_subfolder", None)
             st.session_state.pop("_audit_subfolder_project_path", None)
             st.rerun()
 
-    # --- Step 2 : Sous-dossier d'audit a ingerer ---
-    st.markdown("""
-    <div class="step-card">
-        <h3><span class="step-number">2</span> Sous-dossier d'audit</h3>
-    </div>
-    """, unsafe_allow_html=True)
-
+    st.caption("Sous-dossier")
     selected_audit_subfolder: str | None = None
     if selected_path:
         previous_audit_project = st.session_state.get("_audit_subfolder_project_path")
@@ -399,10 +403,10 @@ def render_audit_tab():
                 "Seul le dossier Operateur sera ingere s'il existe."
             )
 
-    # --- Step 3 : Options ---
+    # --- Section 2 : Options ---
     st.markdown("""
     <div class="step-card">
-        <h3><span class="step-number">3</span> Options</h3>
+        <h3><span class="step-number">2</span> Options</h3>
     </div>
     """, unsafe_allow_html=True)
 
@@ -412,24 +416,35 @@ def render_audit_tab():
     with col_left:
         run_operation = st.toggle("Opération", value=True)
         run_bilan = st.toggle("Bilan", value=True)
+        run_mandats = st.toggle("Mandats Pappers", value=True)
+        send_email = st.toggle("Envoyer par email", value=False)
     with col_right:
         run_patrimoine = st.toggle("Patrimoine", value=True)
         run_compte_resultat = st.toggle("Compte de résultat", value=True)
+        run_lots = st.toggle("Lots", value=True)
 
+    """
     col_a, col_b = st.columns(2)
     with col_a:
         run_mandats = st.toggle("Mandats Pappers", value=True)
     with col_b:
         send_email = st.toggle("Envoyer par email", value=False)
+    """
 
+    smtp_configured, smtp_missing = _get_smtp_config_status()
     email_to = ""
     if send_email:
         email_to = st.text_input("Email de notification", placeholder="prenom@raizers.com")
-
+        if not smtp_configured:
+            st.warning(
+                "Email inactive: configuration SMTP manquante "
+                f"({', '.join(smtp_missing)}). Ajoute ces variables dans `.env`."
+            )
+    
     # --- Historique ---
     st.markdown("""
     <div class="step-card">
-        <h3><span class="step-number">4</span> Historique recent</h3>
+        <h3><span class="step-number">3</span> Historique recent</h3>
     </div>
     """, unsafe_allow_html=True)
 
@@ -455,11 +470,17 @@ def render_audit_tab():
         if not selected_path:
             st.error("Selectionne un dossier.")
             return
-        if not any((run_operation, run_patrimoine, run_bilan, run_compte_resultat)):
+        if not any((run_operation, run_patrimoine, run_bilan, run_compte_resultat, run_lots)):
             st.error("Selectionne au moins un onglet Excel a generer.")
             return
         if send_email and not email_to:
             st.error("Renseigne un email de notification pour activer l'envoi.")
+            return
+        if send_email and not smtp_configured:
+            st.error(
+                "Impossible d'envoyer l'email: configuration SMTP manquante "
+                f"({', '.join(smtp_missing)})."
+            )
             return
 
         project_path = selected_path
@@ -626,6 +647,7 @@ def render_audit_tab():
                     include_patrimoine=run_patrimoine,
                     include_bilan=run_bilan,
                     include_compte_resultat=run_compte_resultat,
+                    include_lots=run_lots,
                 )
                 excel_path = fill_excel(
                     results=extraction_data["results"],
@@ -637,6 +659,7 @@ def render_audit_tab():
                     include_patrimoine=run_patrimoine,
                     include_bilan=run_bilan,
                     include_compte_resultat=run_compte_resultat,
+                    include_lots=run_lots,
                 )
                 results_summary["fill"] = "rapport.xlsx"
                 st.write("Excel : rapport.xlsx genere")
@@ -703,6 +726,7 @@ def render_audit_tab():
                     "patrimoine": run_patrimoine,
                     "bilan": run_bilan,
                     "compte_resultat": run_compte_resultat,
+                    "lots": run_lots,
                     "extract": True,
                     "mandats": run_mandats,
                     "fill": True,
