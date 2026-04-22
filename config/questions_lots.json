@@ -1,0 +1,55 @@
+{
+  "_description": "Grille de lots du programme immobilier (un objet par lot) — alimente l'onglet 'Lots' du fichier Excel. Source : document 'Grille de lots' dans le dossier Commercialisation de l'opération.",
+  "_notes": [
+    "hint_keywords : mots-clés dans le filename ou source_path pour matcher le document. Matching canonique : casse/accents/préfixes numériques ignorés.",
+    "source_dirs : le doc doit avoir sa source_path contenant l'un de ces dossiers en sous-séquence. Chemin typique : *Audit/*{selected_audit_folder}/*Commercialisation/*Grille de lots.",
+    "source_doc_name_variants : noms de fichier typiques permettant de matcher par nom seul (sans chemin).",
+    "context_hint : contexte métier transmis au LLM pour l'aider à identifier la bonne information dans le document.",
+    "excel_sheet : 'Lots' = onglet fixe dans le fichier Excel.",
+    "type : 'table' = array d'objets JSON, un objet par ligne de lot."
+  ],
+  "fields": [
+    {
+      "_comment": "=== GRILLE DE LOTS ==="
+    },
+    {
+      "field_id": "lots_table",
+      "label": "Grille de lots",
+      "question": "Lis la GRILLE DE LOTS et retourne TOUTES les lignes du tableau sous forme d'array JSON.\n\nChaque objet représente un lot avec les clés suivantes :\n- \"lot_numero\" : numéro ou référence du lot (string)\n- \"niveau\" : étage ou niveau du lot (string, ex: RDC, R+1, R+2)\n- \"typologie\" : type de logement (string, ex: T1, T2, T3, Studio, Parking, Cave)\n- \"surface_m2\" : surface habitable en m² (number ou null)\n- \"annexes\" : description des annexes (string, ex: balcon, terrasse, parking, cave, ou null)\n- \"prix_m2\" : prix au m² en euros (number ou null)\n- \"prix_vente\" : prix de vente total en euros (number ou null)\n- \"precommercialise\" : lot précommercialisé oui ou non (string : \"oui\" ou \"non\")\n- \"etat_commercialisation\" : état de commercialisation avec nom de l'acquéreur si disponible (string ou null)\n- \"conditions_suspensives\" : conditions suspensives mentionnées (string ou null)\n- \"date_signature_contrat\" : date de signature du contrat au format JJ/MM/AAAA (string ou null)\n- \"montant_depot_garantie\" : montant du dépôt de garantie en euros si versé (number ou null)\n\nRègles :\n- Retourne un objet par ligne de lot\n- Ne saute aucune ligne visible dans le tableau\n- Retourne null pour les cellules vides ou illisibles\n- Les montants sont en euros, sans symbole ni espace\n- Si plusieurs lignes concernent un même lot (sous-lignes), regroupe-les en un seul objet\n- Ignore les lignes de totaux",
+      "excel_cell": null,
+      "excel_sheet": "Lots",
+      "type": "table",
+      "column_mapping": {
+        "lot_numero": "B",
+        "niveau": "C",
+        "typologie": "D",
+        "surface_m2": "E",
+        "annexes": "F",
+        "prix_m2": "G",
+        "prix_vente": "H",
+        "precommercialise": "I",
+        "etat_commercialisation": "J",
+        "conditions_suspensives": "K",
+        "date_signature_contrat": "L",
+        "montant_depot_garantie": "M"
+      },
+      "format_hint": "Array JSON d'objets {lot_numero, niveau, typologie, surface_m2, annexes, prix_m2, prix_vente, precommercialise, etat_commercialisation, conditions_suspensives, date_signature_contrat, montant_depot_garantie}.",
+      "context_hint": "Le LLM retourne toutes les lignes de la grille de lots telles qu'elles apparaissent dans le document.",
+      "source_doc_name_variants": [
+        "grille de lots", "grille lots", "lots", "commercialisation"
+      ],
+      "source_dirs": [
+        "*Commercialisation/*Grille*lots",
+        "*Commercialisation/*Grille*",
+        "*Commercialisation",
+        "*Audit/*/*Commercialisation",
+        "*Audit/4. Commercialisation/1. Grille des lots",
+        "*Audit/*1. Grille des lots"
+      ],
+      "hint_keywords": [
+        "grille de lots", "grille lots", "lots", "commercialisation", "offre", "grille de prix", "grille"
+        
+      ]
+    }
+  ]
+}

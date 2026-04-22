@@ -150,12 +150,12 @@
     {
       "field_id": "dirigeants_emprunt",
       "label": "Dirigeant(s) (société emprunt)",
-      "question": "Qui sont le ou les dirigeants de la société portant l'emprunt ? Le dirigeant peut être une personne physique OU une société. Prends en priorité la liste figurant dans la section 'GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES' du Kbis. S'il existe un président, fais-le apparaître en premier, même si c'est une société. Si une autre personne a le pouvoir de diriger, gérer ou engager à titre habituel, conserve-la aussi. Retourne un texte lisible, pas un array JSON, au format 'NOM OU DENOMINATION - fonction ; NOM OU DENOMINATION - fonction'. Les fonctions sont tres souvent parmis : Président, Directeur Général, Gérant, Associé unique.",
+      "question": "Qui sont le ou les dirigeants de la société portant l'emprunt ? Le dirigeant peut être une personne physique OU une société. Prends en priorité la liste figurant dans la section 'GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES' du Kbis. S'il existe un président, fais-le apparaître en premier, même si c'est une société. Retourne un texte lisible, pas un array JSON, au format 'NOM OU DENOMINATION - fonction ; NOM OU DENOMINATION - fonction'. Les fonctions sont très souvent parmis : Président, Directeur Général, Gérant, Associé unique.",
       "excel_cell": "D10",
       "excel_sheet": "Opération",
       "type": "string",
       "format_hint": "Texte lisible sans JSON, ex: SIGNATURE - Président ; CHASSAING Martin - Directeur Général",
-      "context_hint": "Dirigeants de la société emprunteuse (président, gérant, DG). Le président peut être une personne morale.",
+      "context_hint": "Dirigeants de la société emprunteuse (président, gérant, DG).",
       "source_dirs": [
         "*Audit/*Opérateur/*Eléments juridiques/Société Emprunteuse"
       ],
@@ -309,7 +309,7 @@
     {
       "field_id": "dirigeants_operation",
       "label": "Dirigeant(s) (société opération)",
-      "question": "Si la société portant l'opération est différente, qui sont ses dirigeants ? Le dirigeant peut être une personne physique OU une société. Prends en priorité la liste du Kbis. S'il existe un président, fais-le apparaître en premier, même si c'est une société. Si une autre personne a le pouvoir de diriger, gérer ou engager à titre habituel, conserve-la aussi. Retourne un texte lisible, pas un array JSON, au format 'NOM OU DENOMINATION - fonction ; NOM OU DENOMINATION - fonction'.",
+      "question": "Si la société portant l'opération est différente, qui sont ses dirigeants ? Le dirigeant peut être une personne physique OU une société. Prends en priorité la liste du Kbis. S'il existe un président, fais-le apparaître en premier, même si c'est une société. Retourne un texte lisible, pas un array JSON, au format 'NOM OU DENOMINATION - fonction ; NOM OU DENOMINATION - fonction'. Les fonctions sont très souvent parmis : Président, Directeur Général, Gérant, Associé unique.",
       "excel_cell": "D19",
       "excel_sheet": "Opération",
       "type": "string",

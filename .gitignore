@@ -5,10 +5,6 @@ src/__pycache__/
 .claude/
 cache/
 output/
-config/*
-!config/questions_operateur.json
-!config/questions_patrimoine.json
-!config/questions_finance.json
 logs/
 *.pyc
 .DS_Store
