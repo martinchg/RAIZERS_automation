@@ -167,15 +167,14 @@
     {
       "field_id": "siren_operation",
       "label": "N° SIREN (société opération)",
-      "question": "Si la société portant l'opération est différente de celle portant l'emprunt, quel est son numéro SIREN ? Sinon retourne null.",
+      "question": "Quel est le numéro SIREN de la société portant l'opération ? Retourne uniquement le numéro à 9 chiffres.",
       "excel_cell": "D11",
       "excel_sheet": "Opération",
       "type": "string",
-      "format_hint": "9 chiffres avec espaces, ou null si même société",
-      "context_hint": "La société opération est celle qui porte le projet immobilier (souvent SCI ou SCCV). Si c'est la même que l'emprunteur, retourne null.",
+      "format_hint": "9 chiffres avec espaces (ex: 123 456 789)",
+      "context_hint": "La société opération est celle qui porte le projet immobilier (souvent SCI ou SCCV). C'est le numero Siren présent dans le Kbis dans la section 'Identification de la personne morale' ",
       "source_dirs": [
-        "*Audit/*Opérateur/*Eléments juridiques/Société Opération",
-        "*Audit/{selected_audit_folder}"
+        "*Audit/*Opérateur/*Eléments juridiques/Société Opération"
       ],
       "hint_keywords": [
         "kbis",
@@ -185,15 +184,14 @@
     {
       "field_id": "ville_rcs_operation",
       "label": "Ville du RCS (société opération)",
-      "question": "Si la société portant l'opération est différente, quelle est la ville de son RCS ?",
+      "question": "Quelle est la ville du RCS (Registre du Commerce et des Sociétés) de la société portant l'opération ?",
       "excel_cell": "D12",
       "excel_sheet": "Opération",
       "type": "string",
       "format_hint": null,
-      "context_hint": "Ville du RCS de la société portant l'opération (si différente de l'emprunteuse).",
+      "context_hint": "Ville du RCS de la société portant l'opération. C'est celle du tribunal de commerce où la société opération est enregistrée. C'est celle qui figure dans identification de la personne morale du fichier Kbis de la société opération, ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'.",
       "source_dirs": [
-        "*Audit/*Opérateur/*Eléments juridiques/Société Opération",
-        "*Audit/{selected_audit_folder}"
+        "*Audit/*Opérateur/*Eléments juridiques/Société Opération"
       ],
       "hint_keywords": [
         "kbis",
@@ -203,15 +201,14 @@
     {
       "field_id": "date_immatriculation_operation",
       "label": "Date d'immatriculation (société opération)",
-      "question": "Si la société portant l'opération est différente, quelle est sa date d'immatriculation ?",
+      "question": "Quelle est la date d'immatriculation de la société portant l'opération ?",
       "excel_cell": "D13",
       "excel_sheet": "Opération",
       "type": "string",
-      "format_hint": "format JJ/MM/AAAA ou null",
-      "context_hint": "Date d'immatriculation de la société portant l'opération.",
+      "format_hint": "format JJ/MM/AAAA",
+      "context_hint": "Date d'immatriculation de la société portant l'opération. C'est la date à laquelle la société a été enregistrée au RCS.",
       "source_dirs": [
-        "*Audit/*Opérateur/*Eléments juridiques/Société Opération",
-        "*Audit/{selected_audit_folder}"
+        "*Audit/*Opérateur/*Eléments juridiques/Société Opération"
       ],
       "hint_keywords": [
         "kbis"
@@ -220,15 +217,14 @@
     {
       "field_id": "raison_sociale_operation",
       "label": "Raison Sociale (société opération)",
-      "question": "Si la société portant l'opération est différente, quelle est sa raison sociale exacte ?",
+      "question": "Quelle est la raison sociale exacte de la société portant l'opération ?",
       "excel_cell": "D14",
       "excel_sheet": "Opération",
       "type": "string",
       "format_hint": null,
-      "context_hint": "Nom officiel de la société portant l'opération immobilière.",
+      "context_hint": "Nom officiel de la société portant l'opération immobilière. C'est celle qui figure dans identification de la personne morale du fichier Kbis de la société opération, ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'.",
       "source_dirs": [
-        "*Audit/*Opérateur/*Eléments juridiques/Société Opération",
-        "*Audit/{selected_audit_folder}"
+        "*Audit/*Opérateur/*Eléments juridiques/Société Opération"
       ],
       "hint_keywords": [
         "kbis",
@@ -239,14 +235,14 @@
     {
       "field_id": "forme_juridique_operation",
       "label": "Forme Juridique (société opération)",
-      "question": "Si la société portant l'opération est différente, quelle est sa forme juridique ?",
+      "question": "Quelle est la forme juridique de la société portant l'opération ? (SAS, SARL, SA, SCI, SCCV, etc.)",
       "excel_cell": "D15",
       "excel_sheet": "Opération",
       "type": "string",
       "format_hint": null,
+      "context_hint": "Forme juridique de la société portant l'opération. C'est celle qui figure dans identification de la personne morale du fichier Kbis de la société opération, ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'.",
       "source_dirs": [
         "*Audit/*Opérateur/*Eléments juridiques/Société Opération",
-        "*Audit/{selected_audit_folder}"
       ],
       "hint_keywords": [
         "kbis",
@@ -256,14 +252,14 @@
     {
       "field_id": "capital_social_operation",
       "label": "Capital social (société opération)",
-      "question": "Si la société portant l'opération est différente, quel est son capital social ? Sans le symbole €.",
+      "question": "Quel est le montant du capital social de la société portant l'opération ? Retourne uniquement le nombre, sans le symbole €.",
       "excel_cell": "D16",
       "excel_sheet": "Opération",
       "type": "string",
-      "format_hint": "nombre avec espaces, sans €, ou null",
+      "format_hint": "nombre avec espaces séparateurs de milliers, sans € (ex: 10 000)",
+      "context_hint": "Capital social de la société portant l'opération. C'est celui qui figure dans identification de la personne morale du fichier Kbis de la société opération, ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'.",
       "source_dirs": [
-        "*Audit/*Opérateur/*Eléments juridiques/Société Opération",
-        "*Audit/{selected_audit_folder}"
+        "*Audit/*Opérateur/*Eléments juridiques/Société Opération"
       ],
       "hint_keywords": [
         "kbis",
@@ -274,14 +270,14 @@
     {
       "field_id": "adresse_siege_operation",
       "label": "Adresse du siège (société opération)",
-      "question": "Si la société portant l'opération est différente, quelle est l'adresse de son siège social ?",
+      "question": "Quelle est l'adresse complète du siège social de la société portant l'opération ?",
       "excel_cell": "D17",
       "excel_sheet": "Opération",
       "type": "string",
       "format_hint": null,
+      "context_hint": "Adresse du siège social de la société portant l'opération. C'est celle qui figure dans identification de la personne morale du fichier Kbis de la société opération, ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'.",
       "source_dirs": [
-        "*Audit/*Opérateur/*Eléments juridiques/Société Opération",
-        "*Audit/{selected_audit_folder}"
+        "*Audit/*Opérateur/*Eléments juridiques/Société Opération"
       ],
       "hint_keywords": [
         "kbis",
@@ -291,15 +287,14 @@
     {
       "field_id": "activite_operation",
       "label": "Activité (société opération)",
-      "question": "Si la société portant l'opération est différente, quelle est son activité ?",
+      "question": "Quelle est l'activité de la société portant l'opération, telle qu'elle apparaîtrait sur infogreffe ?",
       "excel_cell": "D18",
       "excel_sheet": "Opération",
       "type": "string",
       "format_hint": null,
       "context_hint": "L'objet social ou activité principale de la société qui gère l'opération. C'est celle qui figure dans identification de la personne morale du fichier Kbis, ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'. Il faut la transformer pour renvoyer uniquement l'essentiel si elle est trop longue, c'est l'intitulé de l'activité typiquement ecrit sur infogreffe.",
       "source_dirs": [
-        "*Audit/*Opérateur/*Eléments juridiques/Société Opération",
-        "*Audit/{selected_audit_folder}"
+        "*Audit/*Opérateur/*Eléments juridiques/Société Opération"
       ],
       "hint_keywords": [
         "kbis",
@@ -309,15 +304,14 @@
     {
       "field_id": "dirigeants_operation",
       "label": "Dirigeant(s) (société opération)",
-      "question": "Si la société portant l'opération est différente, qui sont ses dirigeants ? Le dirigeant peut être une personne physique OU une société. Prends en priorité la liste du Kbis. S'il existe un président, fais-le apparaître en premier, même si c'est une société. Retourne un texte lisible, pas un array JSON, au format 'NOM OU DENOMINATION - fonction ; NOM OU DENOMINATION - fonction'. Les fonctions sont très souvent parmis : Président, Directeur Général, Gérant, Associé unique.",
+      "question": "Qui sont le ou les dirigeants de la société portant l'opération ? Le dirigeant peut être une personne physique OU une société. Prends en priorité la liste du Kbis. S'il existe un président, fais-le apparaître en premier, même si c'est une société. Retourne un texte lisible, pas un array JSON, au format 'NOM OU DENOMINATION - fonction ; NOM OU DENOMINATION - fonction'. Les fonctions sont très souvent parmis : Président, Directeur Général, Gérant, Associé unique.",
       "excel_cell": "D19",
       "excel_sheet": "Opération",
       "type": "string",
       "format_hint": "Texte lisible sans JSON, ex: SIGNATURE - Président ; CHASSAING Martin - Directeur Général",
-      "context_hint": "Dirigeants de la société opération. Le président peut être une personne morale.",
+      "context_hint": "Dirigeants de la société opération. Le président peut être une personne morale. Ils figurent dans le Kbis de la société opération, dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'.",
       "source_dirs": [
-        "*Audit/*Opérateur/*Eléments juridiques/Société Opération",
-        "*Audit/{selected_audit_folder}"
+        "*Audit/*Opérateur/*Eléments juridiques/Société Opération"
       ],
       "hint_keywords": [
         "kbis",
