@@ -390,7 +390,7 @@ def render_audit_tab():
                     key="selected_audit_subfolder",
                 )
             with col_sub_refresh:
-                if st.button("\U0001f504", key="refresh_audit_subfolders", help="Rafraichir les sous-dossiers"):
+                if st.button("↺", key="refresh_audit_subfolders", help="Rafraichir les sous-dossiers"):
                     cache.pop(selected_path, None)
                     st.session_state.pop("selected_audit_subfolder", None)
                     st.rerun()

@@ -6,13 +6,23 @@ import re
 import time
 import unicodedata
 from datetime import date, datetime
+from io import BytesIO
 from typing import Any, Dict, List, Optional
 
+import pandas as pd
 import requests
 import streamlit as st
+from openpyxl.utils import get_column_letter
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from immo_ml import annotate_price_outliers, local_price_coherence_score
+from excel_utils import (
+    HEADER_ALIGNMENT,
+    HEADER_FILL,
+    HEADER_FONT,
+    THIN_BORDER,
+    VALUE_FONT,
+    apply_numeric_format,
+)
 from immo_scoring import (
     ComparableScorer,
     PropertyType,
@@ -37,7 +47,6 @@ DVF_MONTH_WINDOW = 20
 DVF_PAGE_SIZE = 100
 DEFAULT_SEARCH_BBOX_DELTA = 0.002
 DEFAULT_SEARCH_RADIUS_M = int(round(DEFAULT_SEARCH_BBOX_DELTA * 111320))
-ML_PRICE_COHERENCE_BONUS_MAX = 15.0
 
 
 # -----------------------------------------------------------------------------
@@ -181,12 +190,97 @@ def append_comparables_summary_row(
     rows = [dict(row) for row in comparables]
     summary_row = {key: "" for key in rows[0].keys()}
     summary_row["Retenu"] = "Synthèse"
-    summary_row["Adresse"] = "Moyenne des retenus"
+    summary_row["Adresse"] = "Moyenne de tous les comparables"
     summary_row["Prix de vente"] = format_french_number(statistics.get("average_total_price_eur"))
     summary_row["Prix par m²"] = format_french_number(statistics.get("average_price_per_sqm_eur"))
 
     rows.append(summary_row)
     return rows
+
+
+def compute_price_tranche_averages(values: List[float]) -> Dict[str, Optional[float]]:
+    cleaned = sorted(float(value) for value in values if value is not None)
+    if not cleaned:
+        return {
+            "average_price_per_sqm_low_band_eur": None,
+            "average_price_per_sqm_mid_band_eur": None,
+            "average_price_per_sqm_high_band_eur": None,
+        }
+
+    chunk_size, remainder = divmod(len(cleaned), 3)
+    sizes = [chunk_size + (1 if index < remainder else 0) for index in range(3)]
+
+    tranches: List[List[float]] = []
+    start = 0
+    for size in sizes:
+        end = start + size
+        tranches.append(cleaned[start:end])
+        start = end
+
+    def _average(items: List[float]) -> Optional[float]:
+        if not items:
+            return None
+        return round(sum(items) / len(items), 2)
+
+    return {
+        "average_price_per_sqm_low_band_eur": _average(tranches[0]),
+        "average_price_per_sqm_mid_band_eur": _average(tranches[1]),
+        "average_price_per_sqm_high_band_eur": _average(tranches[2]),
+    }
+
+
+def build_immo_excel_export(result: Dict[str, Any]) -> bytes:
+    output = BytesIO()
+    comparables_rows = append_comparables_summary_row(
+        result.get("comparables", []),
+        result.get("statistics", {}),
+    )
+    statistics_rows = [
+        {"Champ": key, "Valeur": format_subject_value(key, value)}
+        for key, value in (result.get("statistics", {}) or {}).items()
+    ]
+
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        pd.DataFrame(comparables_rows).to_excel(
+            writer,
+            sheet_name="Comparables",
+            index=False,
+        )
+        pd.DataFrame(statistics_rows).to_excel(
+            writer,
+            sheet_name="Statistiques",
+            index=False,
+        )
+        for worksheet in writer.book.worksheets:
+            _style_immo_export_sheet(worksheet)
+
+    output.seek(0)
+    return output.getvalue()
+
+
+def _style_immo_export_sheet(worksheet: Any) -> None:
+    worksheet.freeze_panes = "A2"
+
+    for row_idx, row in enumerate(worksheet.iter_rows(), start=1):
+        for cell in row:
+            cell.border = THIN_BORDER
+            if row_idx == 1:
+                cell.font = HEADER_FONT
+                cell.fill = HEADER_FILL
+                cell.alignment = HEADER_ALIGNMENT
+            else:
+                cell.font = VALUE_FONT
+                apply_numeric_format(cell)
+
+    for column_idx, column_cells in enumerate(worksheet.columns, start=1):
+        max_length = 0
+        for cell in column_cells:
+            value = "" if cell.value is None else str(cell.value)
+            max_length = max(max_length, len(value))
+        worksheet.column_dimensions[get_column_letter(column_idx)].width = min(
+            max(max_length + 2, 12),
+            40,
+        )
 
 
 def try_parse_date(value: Any) -> Optional[date]:
@@ -628,10 +722,19 @@ class ComparablePipeline:
             api_min_year=payload.api_min_year,
         )
 
-        eligible_comparables: List[Dict[str, Any]] = []
+        normalized_comparables: List[Dict[str, Any]] = []
         for raw in raw_records:
             comp = self._normalize_record(raw, subject)
             if comp is None:
+                continue
+            normalized_comparables.append(comp)
+
+        deduplicated_comparables = self._deduplicate_recent_same_address_sales(normalized_comparables)
+
+        eligible_comparables: List[Dict[str, Any]] = []
+        for comp in deduplicated_comparables:
+            distance_m = comp.get("distance_m")
+            if distance_m is not None and distance_m > payload.search_radius_m:
                 continue
             comp["similarity_score"] = self.scorer.score(
                 subject,
@@ -645,62 +748,26 @@ class ComparablePipeline:
             for comp in eligible_comparables
             if comp.get("price_per_sqm_eur") is not None
         ]
-        local_median_price_per_sqm = median(eligible_prices)
-
-        for comp in eligible_comparables:
-            comp["similarity_score"] = round(
-                float(comp.get("similarity_score") or 0)
-                + self.scorer.price_per_sqm_bonus(
-                    subject,
-                    comp,
-                    local_median_price_per_sqm=local_median_price_per_sqm,
-                ),
-                2,
-            )
-            comp["similarity_score"] = round(
-                float(comp.get("similarity_score") or 0)
-                + self.scorer.price_per_sqm_penalty(
-                    comp,
-                    local_median_price_per_sqm=local_median_price_per_sqm,
-                ),
-                2,
-            )
-            comp["ml_price_coherence_score"] = round(
-                local_price_coherence_score(
-                    comp,
-                    local_median_price_per_sqm=local_median_price_per_sqm,
-                ),
-                3,
-            )
-            comp["similarity_score"] = round(
-                float(comp.get("similarity_score") or 0)
-                + comp["ml_price_coherence_score"] * ML_PRICE_COHERENCE_BONUS_MAX,
-                2,
-            )
-
-        eligible_comparables = annotate_price_outliers(eligible_comparables)
-        for comp in eligible_comparables:
-            if comp.get("ml_is_outlier"):
-                comp["similarity_score"] = round(float(comp.get("similarity_score") or 0) - 25.0, 2)
 
         sorted_comparables = self._sort_comparables(eligible_comparables)
         retained_comparables = self._select_comparables(subject, sorted_comparables)
         retained_ids = {id(comp) for comp in retained_comparables}
-        retained_total_prices = [
+        all_total_prices = [
             comp["total_price_eur"]
-            for comp in retained_comparables
+            for comp in sorted_comparables
             if comp.get("total_price_eur") is not None
         ]
-        retained_prices = [
+        all_prices = [
             comp["price_per_sqm_eur"]
-            for comp in retained_comparables
+            for comp in sorted_comparables
             if comp.get("price_per_sqm_eur") is not None
         ]
         returned_comparables = [
             self._format_comparable_for_display(comp, retained=id(comp) in retained_ids)
             for comp in sorted_comparables
         ]
-        median_price = median(retained_prices)
+        median_price = median(all_prices)
+        price_tranches = compute_price_tranche_averages(all_prices)
 
         return {
             "subject": subject.model_dump(),
@@ -709,14 +776,13 @@ class ComparablePipeline:
                 "search_radius_m_used": payload.search_radius_m,
                 "api_min_year_used": payload.api_min_year,
                 "comparables_found": len(eligible_comparables),
-                "comparables_after_outlier_filter": len([comp for comp in eligible_comparables if not comp.get("ml_is_outlier")]),
-                "outliers_detected": len([comp for comp in eligible_comparables if comp.get("ml_is_outlier")]),
                 "comparables_retained": len(retained_comparables),
-                "average_total_price_eur": round(sum(retained_total_prices) / len(retained_total_prices), 2) if retained_total_prices else None,
-                "min_price_per_sqm_eur": min(retained_prices) if retained_prices else None,
+                "average_total_price_eur": round(sum(all_total_prices) / len(all_total_prices), 2) if all_total_prices else None,
+                "min_price_per_sqm_eur": min(all_prices) if all_prices else None,
                 "median_price_per_sqm_eur": round(median_price, 2) if median_price is not None else None,
-                "max_price_per_sqm_eur": max(retained_prices) if retained_prices else None,
-                "average_price_per_sqm_eur": round(sum(retained_prices) / len(retained_prices), 2) if retained_prices else None,
+                "max_price_per_sqm_eur": max(all_prices) if all_prices else None,
+                "average_price_per_sqm_eur": round(sum(all_prices) / len(all_prices), 2) if all_prices else None,
+                **price_tranches,
             },
         }
 
@@ -772,9 +838,35 @@ class ComparablePipeline:
         subject: SubjectProperty,
         comparables: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        non_outliers = [comp for comp in comparables if not comp.get("ml_is_outlier")]
-        pool = non_outliers or comparables
-        return self._sort_comparables(pool)[:MAX_RETAINED_COMPARABLES]
+        return self._sort_comparables(comparables)[:MAX_RETAINED_COMPARABLES]
+
+    @staticmethod
+    def _deduplicate_recent_same_address_sales(comparables: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        kept_by_address: Dict[str, List[date]] = {}
+        deduplicated: List[Dict[str, Any]] = []
+
+        comparables_sorted = sorted(
+            comparables,
+            key=lambda comp: comp.get("sale_date") or date.min,
+            reverse=True,
+        )
+
+        for comp in comparables_sorted:
+            address = comp.get("address")
+            sale_date = comp.get("sale_date")
+            if not address or sale_date is None:
+                deduplicated.append(comp)
+                continue
+
+            address_key = _normalize_address_text(str(address))
+            kept_dates = kept_by_address.setdefault(address_key, [])
+            if any(abs((kept_date - sale_date).days) < 365 for kept_date in kept_dates):
+                continue
+
+            kept_dates.append(sale_date)
+            deduplicated.append(comp)
+
+        return deduplicated
 
     @staticmethod
     def _sort_comparables(comparables: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -790,9 +882,7 @@ class ComparablePipeline:
     def _format_comparable_for_display(self, comp: Dict[str, Any], *, retained: bool) -> Dict[str, Any]:
         return {
             "Retenu": "Oui" if retained else "Non",
-            "Outlier": "Oui" if comp.get("ml_is_outlier") else "Non",
             "Score": format_french_number(comp.get("similarity_score")),
-            "Cohérence prix ML": format_french_number(comp.get("ml_price_coherence_score")),
             "Adresse": comp.get("address"),
             "Type de bien": comp.get("property_label"),
             "Surface habitable": format_french_number(comp.get("living_area_sqm")),
@@ -1112,3 +1202,11 @@ def render_real_estate_tab():
 
     display_comps = append_comparables_summary_row(comps, result.get("statistics", {}))
     st.dataframe(display_comps, use_container_width=True, hide_index=True)
+    st.download_button(
+        label="Télécharger le tableau Excel",
+        data=build_immo_excel_export(result),
+        file_name="comparatif_immobilier.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+        key="download_immo_excel",
+    )
