@@ -242,7 +242,7 @@
       "format_hint": null,
       "context_hint": "Forme juridique de la société portant l'opération. C'est celle qui figure dans identification de la personne morale du fichier Kbis de la société opération, ne va pas dans la section GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'.",
       "source_dirs": [
-        "*Audit/*Opérateur/*Eléments juridiques/Société Opération",
+        "*Audit/*Opérateur/*Eléments juridiques/Société Opération"
       ],
       "hint_keywords": [
         "kbis",
