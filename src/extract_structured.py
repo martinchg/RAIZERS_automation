@@ -126,6 +126,7 @@ def run(
     include_patrimoine: bool = True,
     include_bilan: bool = True,
     include_compte_resultat: bool = True,
+    include_lots: bool = True,
     include_financiers: Optional[bool] = None,
 ):
     project_dir = OUTPUT_DIR / project_id
@@ -150,6 +151,7 @@ def run(
         include_patrimoine=include_patrimoine,
         include_bilan=include_bilan,
         include_compte_resultat=include_compte_resultat,
+        include_lots=include_lots,
     )
     selected_audit_folder = manifest.get("selected_audit_folder")
 

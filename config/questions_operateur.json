@@ -150,7 +150,7 @@
     {
       "field_id": "dirigeants_emprunt",
       "label": "Dirigeant(s) (société emprunt)",
-      "question": "Qui sont le ou les dirigeants de la société portant l'emprunt ? Le dirigeant peut être une personne physique OU une société. Prends en priorité la liste figurant dans la section 'GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES' du Kbis. S'il existe un président, fais-le apparaître en premier, même si c'est une société. Si une autre personne a le pouvoir de diriger, gérer ou engager à titre habituel, conserve-la aussi. Retourne un texte lisible, pas un array JSON, au format 'NOM OU DENOMINATION - fonction ; NOM OU DENOMINATION - fonction'.",
+      "question": "Qui sont le ou les dirigeants de la société portant l'emprunt ? Le dirigeant peut être une personne physique OU une société. Prends en priorité la liste figurant dans la section 'GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES' du Kbis. S'il existe un président, fais-le apparaître en premier, même si c'est une société. Si une autre personne a le pouvoir de diriger, gérer ou engager à titre habituel, conserve-la aussi. Retourne un texte lisible, pas un array JSON, au format 'NOM OU DENOMINATION - fonction ; NOM OU DENOMINATION - fonction'. Les fonctions sont tres souvent parmis : Président, Directeur Général, Gérant, Associé unique.",
       "excel_cell": "D10",
       "excel_sheet": "Opération",
       "type": "string",
@@ -354,7 +354,8 @@
       "hint_keywords": [
         "lots",
         "grille de lots",
-        "contrat obligataire"
+        "contrat obligataire",
+        "grille"
       ]
     },
     {

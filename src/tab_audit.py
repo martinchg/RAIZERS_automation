@@ -555,6 +555,7 @@ def render_audit_tab():
                 include_patrimoine=run_patrimoine,
                 include_bilan=run_bilan,
                 include_compte_resultat=run_compte_resultat,
+                include_lots=run_lots,
             )
 
             results_path = project_dir / "extraction_results.json"
