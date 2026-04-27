@@ -17,8 +17,8 @@ from pathlib import Path
 
 import streamlit as st
 
-from normalization import matches_pattern
-from question_config import filter_fields_for_excel_tabs, load_questions_config
+from core.normalization import matches_pattern
+from extraction.question_config import filter_fields_for_excel_tabs, load_questions_config
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -548,7 +548,7 @@ def render_audit_tab():
         try:
             status.update(label="Extraction LLM...")
             st.write("**Extraction LLM** en cours...")
-            from extract_structured import run as run_extraction
+            from extraction.extract_structured import run as run_extraction
             run_extraction(
                 project_id,
                 include_operateur=run_operation,
@@ -628,7 +628,7 @@ def render_audit_tab():
         try:
             status.update(label="Generation Excel...")
             st.write("**Excel** — Generation du rapport...")
-            from excel_filler import fill_excel
+            from sheets.excel_filler import fill_excel
 
             results_path = project_dir / "extraction_results.json"
             if results_path.exists():

@@ -5,7 +5,7 @@ from typing import Dict, List, Optional, Tuple
 from openpyxl import Workbook
 from openpyxl.styles import Font
 
-from excel_utils import (
+from core.excel_utils import (
     BOLD_FONT,
     HEADER_ALIGNMENT,
     HEADER_FILL,
@@ -19,7 +19,7 @@ from excel_utils import (
     format_display_value,
     to_number,
 )
-from financial_mapping import build_financial_table_lookup, resolve_financial_metric_value
+from financial.financial_mapping import build_financial_table_lookup, resolve_financial_metric_value
 
 _BILAN_ACTIF_ROWS = (
     ("Immobilisations corporelles", "immobilisations_corporelles", VALUE_FONT),

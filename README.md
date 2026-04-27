@@ -19,6 +19,7 @@ Le pipeline :
 - synchronise uniquement le dossier `Opérateur` et le sous-dossier d'audit sélectionné ;
 - ignore les chemins archivés (`old`, `.old`, `archive`, etc.) ;
 - applique un préfiltrage métier avant extraction/chunking ;
+- réutilise le cache des documents déjà chunkés quand le `source_path` et la taille du fichier n'ont pas changé ;
 - génère les documents chunkés dans `output/<project_id>/`.
 
 Option :
@@ -88,6 +89,56 @@ L'application Streamlit orchestre le même flux :
 - mandats Pappers ;
 - génération Excel.
 
+## Structure du code
+
+```bash
+src/
+├── core/               # utilitaires transversaux
+│   ├── runtime_config.py
+│   ├── normalization.py
+│   ├── excel_utils.py
+│   ├── chunking.py
+│   └── llm_client.py
+├── extraction/         # pipeline LLM documents → JSON structuré
+│   ├── extract_structured.py
+│   ├── extract_structured_documents.py
+│   ├── extract_structured_prompts.py
+│   ├── extract_structured_runtime.py
+│   └── question_config.py
+├── financial/          # pipeline PDF bilan
+│   ├── financial_pdf_pipeline.py
+│   ├── financial_pdf_llm_prep.py
+│   ├── financial_pdf_second_pass.py
+│   ├── financial_tables_native.py
+│   └── financial_mapping.py
+├── pappers/            # Pappers API + comptes
+│   ├── pappers_enrichment.py
+│   ├── pappers_comptes_flatten.py
+│   ├── pappers_comptes_revelateur.py
+│   └── pappers_fetch_comptes.py
+├── sheets/             # écriture Excel par onglet
+│   ├── excel_filler.py
+│   ├── bilan_sheet.py
+│   ├── lots_sheet.py
+│   ├── mandats_sheet.py
+│   ├── operation_sheet.py
+│   └── patrimoine_sheet.py
+├── pipeline.py         # orchestrateur principal Dropbox → cache → manifest
+├── ingestion.py
+├── dropbox_client.py
+├── mandats_pipeline.py
+├── extract_people_from_casiers.py
+├── immo_scoring.py
+├── tab_audit.py
+├── tab_immo.py
+└── patrimoine_tables_native.py
+```
+
+Repères :
+- `app.py` pilote l'interface Streamlit.
+- `run.py` expose les commandes CLI (`pipeline`, `extract`, `mandats`, `fill`).
+- Les imports Python sont désormais organisés par domaine (`core.*`, `extraction.*`, `financial.*`, `pappers.*`, `sheets.*`).
+
 ## Structure de sortie
 
 ```bash
@@ -104,7 +155,9 @@ Champs utiles dans `manifest.json` :
 - `selected_audit_folder` : sous-dossier d'audit retenu ;
 - `stats.files_found` : fichiers supportés trouvés dans le cache local ;
 - `stats.files_in_scope` : fichiers dans le périmètre `Opérateur` + sous-dossier d'audit ;
-- `stats.files_processed` : fichiers réellement extraits/chunkés.
+- `stats.files_processed` : fichiers réellement ré-extraits/re-chunkés sur ce run ;
+- `stats.files_reused_from_cache` : fichiers réutilisés depuis le cache ;
+- `stats.files_ready` : nombre total de documents disponibles pour les étapes suivantes.
 
 ## Variables d'environnement requises
 

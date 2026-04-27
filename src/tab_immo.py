@@ -8,17 +8,20 @@ import unicodedata
 from datetime import date, datetime
 from io import BytesIO
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 
-import pandas as pd
 import requests
 import streamlit as st
+from openpyxl import Workbook
+from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from excel_utils import (
+from core.excel_utils import (
     HEADER_ALIGNMENT,
     HEADER_FILL,
     HEADER_FONT,
+    HYPERLINK_FONT,
     THIN_BORDER,
     VALUE_FONT,
     apply_numeric_format,
@@ -229,31 +232,115 @@ def compute_price_tranche_averages(values: List[float]) -> Dict[str, Optional[fl
     }
 
 
+_STATS_LABELS_FR: Dict[str, str] = {
+    "search_radius_m_used": "Rayon de recherche (m)",
+    "api_min_year_used": "Année minimale",
+    "comparables_found": "Comparables trouvés",
+    "comparables_retained": "Comparables retenus",
+    "average_total_price_eur": "Prix de vente moyen (€)",
+    "min_price_per_sqm_eur": "Prix/m² minimum (€)",
+    "median_price_per_sqm_eur": "Prix/m² médian (€)",
+    "max_price_per_sqm_eur": "Prix/m² maximum (€)",
+    "average_price_per_sqm_eur": "Prix/m² moyen (€)",
+    "average_price_per_sqm_low_band_eur": "Prix/m² moyen tranche basse (€)",
+    "average_price_per_sqm_mid_band_eur": "Prix/m² moyen tranche médiane (€)",
+    "average_price_per_sqm_high_band_eur": "Prix/m² moyen tranche haute (€)",
+}
+
+_HIDDEN_COLS = {"_latitude", "_longitude"}
+
+
+def _build_maps_url(lat: Optional[float], lon: Optional[float], address: Optional[str]) -> Optional[str]:
+    if lat is not None and lon is not None:
+        return f"https://www.google.com/maps?q={lat},{lon}"
+    if address:
+        return f"https://www.google.com/maps/search/{quote(str(address))}"
+    return None
+
+
 def build_immo_excel_export(result: Dict[str, Any]) -> bytes:
     output = BytesIO()
     comparables_rows = append_comparables_summary_row(
         result.get("comparables", []),
         result.get("statistics", {}),
     )
-    statistics_rows = [
-        {"Champ": key, "Valeur": format_subject_value(key, value)}
-        for key, value in (result.get("statistics", {}) or {}).items()
-    ]
+    statistics = result.get("statistics", {}) or {}
 
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        pd.DataFrame(comparables_rows).to_excel(
-            writer,
-            sheet_name="Comparables",
-            index=False,
-        )
-        pd.DataFrame(statistics_rows).to_excel(
-            writer,
-            sheet_name="Statistiques",
-            index=False,
-        )
-        for worksheet in writer.book.worksheets:
-            _style_immo_export_sheet(worksheet)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Comparables"
 
+    # ---- Determine display columns (exclude hidden metadata) ----
+    display_cols: List[str] = []
+    if comparables_rows:
+        display_cols = [col for col in comparables_rows[0].keys() if col not in _HIDDEN_COLS]
+
+    adresse_col_idx = (display_cols.index("Adresse") + 1) if "Adresse" in display_cols else None
+
+    # ---- Write comparables header ----
+    for col_idx, header in enumerate(display_cols, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.font = HEADER_FONT
+        cell.fill = HEADER_FILL
+        cell.alignment = HEADER_ALIGNMENT
+        cell.border = THIN_BORDER
+
+    # ---- Write comparables rows ----
+    for row_offset, row_data in enumerate(comparables_rows):
+        excel_row = row_offset + 2
+        lat = row_data.get("_latitude")
+        lon = row_data.get("_longitude")
+        address = row_data.get("Adresse")
+        maps_url = _build_maps_url(lat, lon, address)
+
+        for col_idx, col_name in enumerate(display_cols, start=1):
+            cell = ws.cell(row=excel_row, column=col_idx, value=row_data.get(col_name))
+            cell.font = VALUE_FONT
+            cell.border = THIN_BORDER
+            apply_numeric_format(cell)
+
+            if col_idx == adresse_col_idx and maps_url and address:
+                cell.hyperlink = maps_url
+                cell.font = HYPERLINK_FONT
+
+    # ---- Statistics section (French labels, embedded below comparables) ----
+    stats_start_row = len(comparables_rows) + 4
+
+    header_cell = ws.cell(row=stats_start_row, column=1, value="Statistiques")
+    header_cell.font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    header_cell.fill = HEADER_FILL
+    header_cell.alignment = HEADER_ALIGNMENT
+    header_cell.border = THIN_BORDER
+
+    label_header = ws.cell(row=stats_start_row, column=2, value="Valeur")
+    label_header.font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    label_header.fill = HEADER_FILL
+    label_header.alignment = HEADER_ALIGNMENT
+    label_header.border = THIN_BORDER
+
+    for stat_offset, (key, value) in enumerate(statistics.items()):
+        stat_row = stats_start_row + 1 + stat_offset
+        label_cell = ws.cell(row=stat_row, column=1, value=_STATS_LABELS_FR.get(key, key))
+        label_cell.font = VALUE_FONT
+        label_cell.border = THIN_BORDER
+
+        val_cell = ws.cell(row=stat_row, column=2, value=format_subject_value(key, value))
+        val_cell.font = VALUE_FONT
+        val_cell.border = THIN_BORDER
+        apply_numeric_format(val_cell)
+
+    # ---- Column widths ----
+    for col_idx in range(1, len(display_cols) + 1):
+        col_letter = get_column_letter(col_idx)
+        max_length = 0
+        for cell in ws[col_letter]:
+            if cell.value is not None:
+                max_length = max(max_length, len(str(cell.value)))
+        ws.column_dimensions[col_letter].width = min(max(max_length + 2, 12), 40)
+
+    ws.freeze_panes = "A2"
+
+    wb.save(output)
     output.seek(0)
     return output.getvalue()
 
@@ -831,6 +918,8 @@ class ComparablePipeline:
             "distance_m": round(distance_m, 1) if distance_m is not None else None,
             "similarity_score": None,
             "_micro_location_key": normalize_micro_location(street_name),
+            "_latitude": latitude,
+            "_longitude": longitude,
         }
 
     def _select_comparables(
@@ -892,6 +981,8 @@ class ComparablePipeline:
             "Distance (m)": format_french_number(comp.get("distance_m")),
             "Prix de vente": format_french_number(comp.get("total_price_eur")),
             "Prix par m²": format_french_number(comp.get("price_per_sqm_eur")),
+            "_latitude": comp.get("_latitude"),
+            "_longitude": comp.get("_longitude"),
         }
 
     @staticmethod

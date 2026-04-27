@@ -12,7 +12,7 @@ import time
 import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 # Permettre l'exécution directe : python src/pipeline.py
 _SRC_DIR = Path(__file__).parent.resolve()
@@ -20,7 +20,7 @@ if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
 ROOT_DIR = _SRC_DIR.parent.resolve()
-from runtime_config import configure_environment
+from core.runtime_config import configure_environment
 
 configure_environment(ROOT_DIR)
 
@@ -31,8 +31,8 @@ from dropbox.files import FolderMetadata
 
 import dropbox_client as dropbox_client_module
 from ingestion import extract
-from chunking import build_parents, make_document_id
-from normalization import (
+from core.chunking import build_parents, make_document_id
+from core.normalization import (
     canonical_name,
     find_folder_by_canonical,
     is_archived_path,
@@ -40,7 +40,7 @@ from normalization import (
     matches_pattern,
     path_has_segments,
 )
-from question_config import load_question_fields
+from extraction.question_config import load_question_fields
 
 # ---------------------------------------------------------------------------
 # Config
@@ -124,6 +124,19 @@ def write_jsonl(path: Path, records: List[dict]):
         for rec in records:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
     logger.info(f"  {path.name}: {len(records)} lignes")
+
+
+def read_jsonl(path: Path) -> List[dict]:
+    if not path.exists():
+        return []
+    records: List[dict] = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            records.append(json.loads(line))
+    return records
 
 
 
@@ -273,7 +286,7 @@ def prefilter_files_for_extraction(
 
     resolved_source_dirs = _resolve_source_dirs(fields, selected_audit_folder)
     try:
-        from extract_structured import match_questions_to_doc
+        from extraction.extract_structured import match_questions_to_doc
     except Exception:
         match_questions_to_doc = None
     try:
@@ -639,6 +652,50 @@ def is_old_folder_path(file_path: Path) -> bool:
     return is_archived_path(str(file_path))
 
 
+def _load_previous_manifest(project_out: Path) -> dict:
+    manifest_path = project_out / "manifest.json"
+    if not manifest_path.exists():
+        return {}
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        return payload if isinstance(payload, dict) else {}
+    except Exception as exc:
+        logger.warning("Manifest précédent illisible (%s): %s", manifest_path, exc)
+        return {}
+
+
+def _build_cache_key(source_path: str, file_size_bytes: int) -> str:
+    return f"{source_path}::{file_size_bytes}"
+
+
+def _build_previous_file_index(manifest: dict) -> Dict[str, dict]:
+    index: Dict[str, dict] = {}
+    for file_info in manifest.get("files", []) or []:
+        source_path = file_info.get("source_path")
+        if not source_path:
+            continue
+        file_size_bytes = file_info.get("file_size_bytes")
+        if not isinstance(file_size_bytes, int):
+            continue
+        index[_build_cache_key(source_path, file_size_bytes)] = file_info
+    return index
+
+
+def _delete_stale_document_outputs(docs_dir: Path, current_document_ids: set[str]) -> int:
+    if not docs_dir.exists():
+        return 0
+
+    deleted = 0
+    for jsonl_path in docs_dir.glob("*.jsonl"):
+        if jsonl_path.stem in current_document_ids:
+            continue
+        with contextlib.suppress(FileNotFoundError):
+            jsonl_path.unlink()
+            deleted += 1
+    return deleted
+
+
 class DocumentProcessingTimeoutError(TimeoutError):
     pass
 
@@ -674,6 +731,8 @@ def run(project_path: str, selected_audit_folder: Optional[str] = None):
     project_id = slugify(project_path)
     project_out = OUTPUT_DIR / project_id
     project_out.mkdir(parents=True, exist_ok=True)
+    docs_dir = project_out / "documents"
+    docs_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info("=" * 60)
     logger.info(f"Projet : {project_path}")
@@ -742,17 +801,24 @@ def run(project_path: str, selected_audit_folder: Optional[str] = None):
         return
 
     logger.info("ÉTAPE 2 — Extraction + Chunking")
+    previous_manifest = _load_previous_manifest(project_out)
+    previous_file_index = _build_previous_file_index(previous_manifest)
     all_parents = []
     file_manifest = []
     warnings_list = []
     total_skipped = 0
     timed_out_files = 0
+    cached_files = 0
+    reprocessed_files = 0
     doc_timeout_seconds = DEFAULT_DOC_TIMEOUT_SECONDS
 
     total_files_to_process = len(all_files)
+    retained_document_ids: set[str] = set()
 
     for index, file_path in enumerate(tqdm(all_files, desc="Processing", unit="file"), start=1):
         source_path = compute_source_path(file_path, project_local_root)
+        file_size_bytes = file_path.stat().st_size
+        cache_key = _build_cache_key(source_path, file_size_bytes)
         document_id = make_document_id(project_id, source_path)
         started = time.perf_counter()
 
@@ -762,6 +828,32 @@ def run(project_path: str, selected_audit_folder: Optional[str] = None):
             total_files_to_process,
             source_path,
         )
+
+        cached_doc_path = docs_dir / f"{document_id}.jsonl"
+        previous_file_info = previous_file_index.get(cache_key)
+        if (
+            previous_file_info
+            and previous_file_info.get("document_id") == document_id
+            and cached_doc_path.exists()
+        ):
+            cached_parents = read_jsonl(cached_doc_path)
+            if cached_parents:
+                all_parents.extend(cached_parents)
+                total_skipped += int(previous_file_info.get("parents_skipped", 0) or 0)
+                retained_document_ids.add(document_id)
+                file_manifest.append({
+                    **previous_file_info,
+                    "cache_hit": True,
+                    "file_size_bytes": file_size_bytes,
+                })
+                cached_files += 1
+                logger.info(
+                    "    CACHE - %s parent(s), %s tok",
+                    len(cached_parents),
+                    previous_file_info.get("token_estimate", 0),
+                )
+                continue
+            logger.warning("    Cache invalide, retraitement forcé: %s", source_path)
 
         try:
             with _document_time_limit(doc_timeout_seconds):
@@ -785,6 +877,8 @@ def run(project_path: str, selected_audit_folder: Optional[str] = None):
 
             total_skipped += skipped
             all_parents.extend(parents)
+            retained_document_ids.add(document_id)
+            reprocessed_files += 1
 
             category = list(stats.keys())[0] if stats else "unknown"
             file_type = file_path.suffix.lstrip(".").lower()
@@ -800,6 +894,7 @@ def run(project_path: str, selected_audit_folder: Optional[str] = None):
                 "document_id": document_id,
                 "filename": file_path.name,
                 "source_path": source_path,
+                "file_size_bytes": file_size_bytes,
                 "file_type": file_type,
                 "category": category,
                 "pages": max_page,
@@ -807,6 +902,7 @@ def run(project_path: str, selected_audit_folder: Optional[str] = None):
                 "parents_skipped": skipped,
                 "token_estimate": doc_tokens,
                 "processing_seconds": elapsed,
+                "cache_hit": False,
             })
 
             logger.info(
@@ -828,9 +924,6 @@ def run(project_path: str, selected_audit_folder: Optional[str] = None):
             warnings_list.append(f"Erreur ({elapsed:.2f}s): {source_path}: {str(e)[:200]}")
 
     logger.info("ÉTAPE 3 — Écriture output")
-    docs_dir = project_out / "documents"
-    docs_dir.mkdir(parents=True, exist_ok=True)
-
     from collections import defaultdict
     parents_by_doc = defaultdict(list)
     for p in all_parents:
@@ -838,6 +931,10 @@ def run(project_path: str, selected_audit_folder: Optional[str] = None):
 
     for doc_id, doc_parents in parents_by_doc.items():
         write_jsonl(docs_dir / f"{doc_id}.jsonl", doc_parents)
+
+    deleted_outputs = _delete_stale_document_outputs(docs_dir, retained_document_ids)
+    if deleted_outputs:
+        logger.info("  🧹 %s ancien(s) document(s) supprimé(s) du cache", deleted_outputs)
 
     total_tokens = sum(p["token_estimate"] for p in all_parents)
 
@@ -850,7 +947,9 @@ def run(project_path: str, selected_audit_folder: Optional[str] = None):
         "stats": {
             "files_found": len(discovered_files),
             "files_in_scope": len(scoped_files),
-            "files_processed": len(file_manifest),
+            "files_processed": reprocessed_files,
+            "files_reused_from_cache": cached_files,
+            "files_ready": len(file_manifest),
             "files_timed_out": timed_out_files,
             "parents_informative": len(all_parents),
             "parents_skipped": total_skipped,

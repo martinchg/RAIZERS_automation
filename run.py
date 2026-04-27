@@ -66,7 +66,7 @@ def main():
         pipeline_module.run(args.project, selected_audit_folder=args.audit_folder)
 
     elif args.command == "extract":
-        from extract_structured import run
+        from extraction.extract_structured import run
         run(args.project)
 
     elif args.command == "mandats":
@@ -74,7 +74,7 @@ def main():
         run(args.project)
 
     elif args.command == "fill":
-        from excel_filler import main as fill_main
+        from sheets.excel_filler import main as fill_main
         results_path = args.results
         output_dir = args.output_dir
 

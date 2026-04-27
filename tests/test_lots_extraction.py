@@ -9,7 +9,7 @@ import pytest
 SRC = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(SRC))
 
-from lots_sheet import build_lots_sheet
+from sheets.lots_sheet import build_lots_sheet
 from openpyxl import Workbook
 
 
@@ -131,7 +131,7 @@ class TestBuildLotsSheet:
         produisant une chaîne du type 'A01, A02' non parseable par build_lots_sheet.
         On vérifie que json.loads() fonctionne sur la valeur stockée dans results.
         """
-        from extract_structured_runtime import stringify_non_table_value
+        from extraction.extract_structured_runtime import stringify_non_table_value
 
         raw_list = SAMPLE_LOTS
         stringified = stringify_non_table_value(raw_list)

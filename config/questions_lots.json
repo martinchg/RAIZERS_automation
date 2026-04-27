@@ -39,12 +39,12 @@
         "grille de lots", "grille lots", "lots", "commercialisation"
       ],
       "source_dirs": [
-        "*Commercialisation/*Grille*lots",
-        "*Commercialisation/*Grille*",
-        "*Commercialisation",
+
+
         "*Audit/*/*Commercialisation",
-        "*Audit/4. Commercialisation/1. Grille des lots",
-        "*Audit/*1. Grille des lots"
+        "*Audit/*Commercialisation",
+        "*Audit/*/*Acquisition",
+        "*Audit/*Acquisition"
       ],
       "hint_keywords": [
         "grille de lots", "grille lots", "lots", "commercialisation", "offre", "grille de prix", "grille"

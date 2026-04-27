@@ -7,13 +7,13 @@ from typing import Dict, List, Optional
 
 from openpyxl import Workbook
 
-from bilan_sheet import _build_bilan_sheet, _build_compte_resultat_sheet
-from lots_sheet import build_lots_sheet
-from mandats_sheet import build_mandats_sheet
-from normalization import canonical_name, extract_person_folder
-from operation_sheet import build_operation_sheet
-from patrimoine_sheet import build_patrimoine_sheet
-from question_config import load_questions_config
+from sheets.bilan_sheet import _build_bilan_sheet, _build_compte_resultat_sheet
+from sheets.lots_sheet import build_lots_sheet
+from sheets.mandats_sheet import build_mandats_sheet
+from core.normalization import canonical_name, extract_person_folder
+from sheets.operation_sheet import build_operation_sheet
+from sheets.patrimoine_sheet import build_patrimoine_sheet
+from extraction.question_config import load_questions_config
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +112,7 @@ def fill_excel_template(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Cree un Excel depuis extraction_results.json")
-    root = Path(__file__).parent.parent.resolve()
+    root = Path(__file__).parent.parent.parent.resolve()
     parser.add_argument(
         "--results",
         default=str(root / "output" / "extraction_results.json"),

@@ -6,7 +6,7 @@ from urllib.parse import quote
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 
-from excel_utils import HYPERLINK_FONT, LABEL_FONT, THIN_BORDER, VALUE_FONT, format_display_value
+from core.excel_utils import HYPERLINK_FONT, LABEL_FONT, THIN_BORDER, VALUE_FONT, format_display_value
 
 _OPERATION_FIXED_ROWS_AFTER = {
     "montant_collecte": [

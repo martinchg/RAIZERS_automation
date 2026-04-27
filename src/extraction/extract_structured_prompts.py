@@ -2,7 +2,107 @@
 
 from typing import Dict, List
 
-from extract_structured_documents import needs_broad_financial_context
+from extraction.extract_structured_documents import needs_broad_financial_context
+
+
+_MULTIMODAL_FINANCIAL_SCHEMAS = {
+    "bilan_actif_table": {
+        "description": "Tableau principal de bilan actif.",
+        "allowed_keys": [
+            "immobilisations_corporelles",
+            "immobilisations_financieres",
+            "stocks",
+            "creances",
+            "creances_clients",
+            "autres_creances",
+            "tresorerie",
+            "disponibilites",
+            "vmp",
+            "charges_constatees_avance",
+            "autres_actif_residuel",
+            "autres_actif",
+            "total_actif",
+        ],
+    },
+    "bilan_passif_table": {
+        "description": "Tableau principal de bilan passif.",
+        "allowed_keys": [
+            "capital_social",
+            "resultat_exercice",
+            "capitaux_propres",
+            "dettes_financieres",
+            "dettes_bancaires",
+            "autres_dettes_financieres",
+            "dettes_exploitation",
+            "fournisseurs",
+            "dettes_fiscales_sociales",
+            "dettes_diverses",
+            "provisions_pour_risques",
+            "provisions_pour_charges",
+            "produits_constates_avance",
+            "autres_passif_residuel",
+            "autres_passif",
+            "total_passif",
+        ],
+    },
+    "bilan_compte_resultat_table": {
+        "description": "Tableau principal de compte de résultat.",
+        "allowed_keys": [
+            "chiffre_affaires",
+            "charges",
+            "achats_marchandises",
+            "variation_stock_marchandises",
+            "achats_matieres_premieres",
+            "variation_stock_matieres_premieres",
+            "autres_charges_externes",
+            "salaires",
+            "charges_sociales",
+            "salaires_charges_sociales",
+            "impots_taxes",
+            "dotations",
+            "dotations_amortissements",
+            "dotations_provisions",
+            "production_stockee",
+            "subventions_exploitation",
+            "reprises_exploitation",
+            "autres_produits_exploitation",
+            "autres_charges_exploitation",
+            "autres_elements",
+            "resultat_exploitation",
+            "resultat_financier",
+            "operations_en_commun",
+            "resultat_courant_avant_impots",
+            "resultat_exceptionnel",
+            "impots_sur_les_societes",
+            "participation_salaries",
+            "resultat_net",
+        ],
+    },
+}
+
+
+def _build_multimodal_schema_block(field_ids: List[str]) -> str:
+    blocks = []
+    for field_id in field_ids:
+        schema = _MULTIMODAL_FINANCIAL_SCHEMAS.get(field_id)
+        if not schema:
+            continue
+        allowed_keys = ", ".join(schema["allowed_keys"])
+        blocks.append(
+            f"""### {field_id}
+- {schema["description"]}
+- Retourne UNIQUEMENT un array JSON d'objets avec exactement ces clés : `key`, `poste_source`, `n`, `n1`
+- `key` doit être choisie UNIQUEMENT dans cette liste : {allowed_keys}
+- `poste_source` = libellé lu sur la page
+- `n` = exercice le plus récent, `n1` = exercice précédent, sinon `null`
+- N'ajoute aucune autre clé
+- N'inclus pas de ligne hors liste autorisée
+- N'inclus pas d'en-tête, de sous-titre, de commentaire, de total intermédiaire non demandé
+- Ne duplique jamais un même montant dans deux `key`
+- Si un sous-total clair existe pour une `key`, préfère-le au détail
+- Si un montant ne correspond à aucune `key` autorisée sans ambiguïté, ne le retourne pas"""
+        )
+    return "\n\n".join(blocks)
 
 
 def build_prompt(
@@ -127,6 +227,7 @@ def build_multimodal_financial_prompt(
 
     field_ids = [question["field_id"] for question in questions]
     fields_block = "\n".join(fields_desc)
+    schema_block = _build_multimodal_schema_block(field_ids)
 
     return f"""Tu es un analyste financier expert. Tu lis directement des images de pages PDF d'etats financiers.
 
@@ -147,6 +248,12 @@ def build_multimodal_financial_prompt(
 - Si plusieurs colonnes existent (Brut / Amort. / Net / N-1), utilise uniquement les valeurs Net.
 - Ne double-compte jamais un montant dans 2 postes differents.
 - Si un sous-total ou total est affiché clairement, prefere-le aux details.
+- Pour les champs de type tableau financier, ne fais PAS d'extraction libre: remplis uniquement le schema impose ci-dessous.
+- Si une `key` autorisee n'est pas lisible ou pas presente, ne l'invente pas et ne la retourne pas.
+- Pour le compte de resultat, utilise de preference les sous-totaux explicites (`resultat_exploitation`, `resultat_courant_avant_impots`, `resultat_net`, etc.) lorsqu'ils sont affiches.
+
+## Schemas imposes
+{schema_block}
 
 ## Champs a extraire
 {fields_block}

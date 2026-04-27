@@ -5,9 +5,9 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from normalization import canonical_name, canonical_stem, path_has_segments
+from core.normalization import canonical_name, canonical_stem, path_has_segments
 
-LOCAL_CACHE = Path(__file__).parent.parent.resolve() / "cache"
+LOCAL_CACHE = Path(__file__).parent.parent.parent.resolve() / "cache"
 MIN_PARENT_CHARS = 50
 YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2}|21\d{2})\b")
 POSTAL_CODE_RE = re.compile(r"\b\d{5}\b")

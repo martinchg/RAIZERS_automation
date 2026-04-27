@@ -14,11 +14,11 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
-_SRC_DIR = Path(__file__).parent.resolve()
+_SRC_DIR = Path(__file__).parent.parent.resolve()
 if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
-from extract_structured_documents import (
+from extraction.extract_structured_documents import (
     build_latest_year_per_company_folder,
     extract_company_folder_from_source_path,
     get_doc_financial_year,
@@ -29,8 +29,8 @@ from extract_structured_documents import (
     resolve_cached_source_file,
     resolve_project_location,
 )
-from extract_structured_prompts import build_multimodal_financial_prompt, build_prompt
-from extract_structured_runtime import (
+from extraction.extract_structured_prompts import build_multimodal_financial_prompt, build_prompt
+from extraction.extract_structured_runtime import (
     call_llm_with_retry,
     json_clone,
     merge_native_fallback_answers,
@@ -40,19 +40,19 @@ from extract_structured_runtime import (
     stringify_non_table_value,
     write_native_financial_debug,
 )
-from financial_mapping import (
+from financial.financial_mapping import (
     _has_meaningful_value,
     financial_answers_quality_report,
     prepare_financial_answers,
     select_better_financial_answers,
     validate_financial_answers,
 )
-from financial_tables_native import extract_financial_data, render_financial_context
+from financial.financial_tables_native import extract_financial_data, render_financial_context
 from patrimoine_tables_native import extract_patrimoine_data, render_patrimoine_context
-from llm_client import get_llm_client
-from normalization import canonical_name, extract_person_folder
-from question_config import filter_fields_for_excel_tabs, load_questions_config
-from runtime_config import configure_environment
+from core.llm_client import get_llm_client
+from core.normalization import canonical_name, extract_person_folder
+from extraction.question_config import filter_fields_for_excel_tabs, load_questions_config
+from core.runtime_config import configure_environment
 
 ROOT_DIR = _SRC_DIR.parent.resolve()
 configure_environment(ROOT_DIR)

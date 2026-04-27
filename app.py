@@ -28,13 +28,13 @@ from PIL import Image
 ROOT_DIR = Path(__file__).parent.resolve()
 sys.path.insert(0, str(ROOT_DIR / "src"))
 
-from runtime_config import configure_environment
+from core.runtime_config import configure_environment
 from tab_audit import render_audit_tab
 from tab_immo import render_real_estate_tab
 
 configure_environment(ROOT_DIR)
 
-from normalization import matches_pattern
+from core.normalization import matches_pattern
 
 OUTPUT_DIR = ROOT_DIR / "output"
 LOGO_PATH = ROOT_DIR / "assets" / "raizers_logo.png"

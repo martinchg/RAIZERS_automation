@@ -12,7 +12,7 @@ from typing import Dict, List, Optional
 
 import fitz
 
-from normalization import canonical_name
+from core.normalization import canonical_name
 
 # ---------------------------------------------------------------------------
 # Détection de page

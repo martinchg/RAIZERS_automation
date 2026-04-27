@@ -7,7 +7,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 
-from excel_utils import (
+from core.excel_utils import (
     HEADER_ALIGNMENT,
     HEADER_FILL,
     HEADER_FONT,
@@ -21,7 +21,7 @@ from excel_utils import (
     normalize_key,
     to_number,
 )
-from normalization import is_archived_path
+from core.normalization import is_archived_path
 
 # ---------------------------------------------------------------------------
 # Mapping clé canonique → variantes LLM acceptées

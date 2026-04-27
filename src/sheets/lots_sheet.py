@@ -8,7 +8,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 
-from excel_utils import (
+from core.excel_utils import (
     BOLD_FONT,
     HEADER_ALIGNMENT,
     HEADER_FILL,

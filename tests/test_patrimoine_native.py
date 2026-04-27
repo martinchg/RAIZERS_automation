@@ -18,7 +18,7 @@ from patrimoine_tables_native import (
     pick_patrimoine_table,
     render_patrimoine_context,
 )
-from patrimoine_sheet import _resolve_table_value, _PATRIMOINE_COL_MAP
+from sheets.patrimoine_sheet import _resolve_table_value, _PATRIMOINE_COL_MAP
 
 
 # ---------------------------------------------------------------------------

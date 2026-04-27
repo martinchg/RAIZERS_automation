@@ -8,7 +8,12 @@ from typing import Dict, List, Optional, Tuple
 
 import fitz
 
-from normalization import canonical_name
+try:
+    import pymupdf4llm as _pymupdf4llm
+except ImportError:
+    _pymupdf4llm = None
+
+from core.normalization import canonical_name
 
 TITLE_PATTERNS: List[Tuple[str, re.Pattern]] = [
     ("bilan_actif", re.compile(r"^\s*bilan\s+actif\s*$", re.IGNORECASE)),
@@ -64,6 +69,7 @@ TARGETS_BY_SECTION: Dict[str, Dict[str, List[str]]] = {
 }
 
 EXCLUDE_PATTERN = re.compile(r"d[ée]taill|\(suite\)", re.IGNORECASE)
+_CDR_SUITE_PATTERN = re.compile(r"compte\s+de\s+r[eé]sultat\s*\(suite\)", re.IGNORECASE)
 TOC_EXCLUDE_PATTERN = re.compile(
     r"sommaire|table\s+des\s+mati[eè]res|rapport\s+de\s+l[' ]expert"
     r"|detail\s+des\s+comptes|notes\s+sur\s+le\s+bilan|notes\s+sur\s+le\s+compte",
@@ -120,8 +126,17 @@ def extract_tables_on_page(page: fitz.Page) -> List[List[List[str]]]:
     finder = page.find_tables()
     tables: List[List[List[str]]] = []
     for table in finder.tables:
-        rows = table.extract()
-        tables.append([[_clean_cell(cell or "") for cell in row] for row in rows])
+        rows: List[List[str]] = []
+        for table_row in table.rows:
+            row_texts = []
+            for cell_rect in table_row.cells:
+                if cell_rect is None:
+                    row_texts.append("")
+                    continue
+                text = page.get_text("text", clip=fitz.Rect(cell_rect)).strip()
+                row_texts.append(_clean_cell(text))
+            rows.append(row_texts)
+        tables.append(rows)
     return tables
 
 
@@ -462,12 +477,33 @@ def extract_financial_data(pdf_path: Path) -> Dict[str, object]:
             tables = extract_tables_on_page(doc[page_num - 1])
             main_table = pick_main_table(tables, section_label)
             normalized_rows = _build_logical_rows(main_table or [])
+
+            extra_pages: List[int] = []
+            if section_label == "compte_resultat":
+                for candidate in range(page_num, min(page_num + 3, len(doc))):
+                    page_text = doc[candidate].get_text("text")
+                    if _CDR_SUITE_PATTERN.search(page_text[:600]):
+                        suite_tables = extract_tables_on_page(doc[candidate])
+                        suite_main = pick_main_table(suite_tables, section_label)
+                        suite_rows = _build_logical_rows(suite_main or [])
+                        normalized_rows = _dedupe_rows(normalized_rows + suite_rows)
+                        extra_pages.append(candidate + 1)
+
             result[field_id] = normalized_rows
             result[f"{field_id}__meta"] = {
                 "page": page_num,
+                "extra_pages": extra_pages,
                 "tables_detected": len(tables),
                 "rows_normalized": len(normalized_rows),
             }
+
+            if section_label == "compte_resultat" and _pymupdf4llm is not None:
+                cdr_pages = [page_num - 1] + [p - 1 for p in extra_pages]
+                try:
+                    md = _pymupdf4llm.to_markdown(str(pdf_path), pages=cdr_pages)
+                    result["bilan_compte_resultat_markdown"] = md
+                except Exception:
+                    pass
 
         result["_native_available"] = True
         return result
@@ -490,7 +526,7 @@ def render_financial_context(native_data: Dict[str, object], requested_field_ids
     if not payload:
         return ""
 
-    return (
+    parts = [
         "## EXTRACTION NATIVE PRE-NETTOYEE (prioritaire si coherente)\n"
         "Cette structure vient de PyMuPDF find_tables() avec un pre-nettoyage deterministe :\n"
         "- choix de page\n"
@@ -500,4 +536,16 @@ def render_financial_context(native_data: Dict[str, object], requested_field_ids
         f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n```\n"
         "Si cette extraction native parait coherente, utilise-la comme source primaire.\n"
         "Reviens au texte brut du document seulement pour lever une ambiguite ou completer une ligne manquante.\n"
-    )
+    ]
+
+    needs_cdr = any(fid == "bilan_compte_resultat_table" for fid in requested_field_ids)
+    cdr_md = native_data.get("bilan_compte_resultat_markdown")
+    if needs_cdr and cdr_md:
+        parts.append(
+            "\n## TABLEAU COMPTE DE RESULTAT (markdown brut, structure de colonnes préservée)\n"
+            "Utilise ce tableau pour identifier correctement les colonnes N et N-1 du CDR.\n"
+            "Les colonnes 'France' et 'Exportation' sont des détails ; utilise uniquement la colonne 'Total'.\n\n"
+            f"{cdr_md}\n"
+        )
+
+    return "".join(parts)

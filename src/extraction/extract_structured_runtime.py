@@ -11,7 +11,7 @@ from typing import Callable, Dict, List, Optional
 import fitz
 from PIL import Image
 
-from financial_mapping import _has_meaningful_value
+from financial.financial_mapping import _has_meaningful_value
 
 logger = logging.getLogger(__name__)
 

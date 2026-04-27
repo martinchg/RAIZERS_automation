@@ -13,7 +13,7 @@ from typing import List
 
 import dropbox
 from dropbox.files import FileMetadata, FolderMetadata
-from runtime_config import configure_environment
+from core.runtime_config import configure_environment
 
 ROOT_DIR = Path(__file__).parent.parent.resolve()
 configure_environment(ROOT_DIR)

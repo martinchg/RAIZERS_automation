@@ -10,7 +10,7 @@ import json
 import logging
 from typing import Dict, List, Optional
 
-from normalization import canonical_name
+from core.normalization import canonical_name
 
 logger = logging.getLogger(__name__)
 

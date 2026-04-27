@@ -7,7 +7,7 @@ from typing import Dict, Optional
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font
 
-from excel_utils import (
+from core.excel_utils import (
     HEADER_ALIGNMENT,
     HEADER_FILL,
     HEADER_FONT,
@@ -19,7 +19,7 @@ from excel_utils import (
     format_display_value,
     format_number_with_spaces,
 )
-from normalization import canonical_name
+from core.normalization import canonical_name
 
 
 def _slugify_company_name(value: str) -> str:
