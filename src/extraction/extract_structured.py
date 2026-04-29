@@ -543,6 +543,24 @@ def run(
             "Localisation projet ignoree: aucune adresse precise corroborree sur deux documents"
         )
 
+    # ── Nouveau pipeline PDF bilan (4 colonnes) ───────────────────────────────
+    if include_bilan:
+        try:
+            from financial.financial_bilan_integrator import run_for_project
+            logger.info("Démarrage du pipeline PDF bilan pour projet=%s", project_id)
+            bilan_results = run_for_project(project_id, output_dir=project_dir)
+            if bilan_results:
+                bilan_path = project_dir / "bilan_results.json"
+                bilan_path.write_text(
+                    json.dumps(bilan_results, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                logger.info("bilan_results.json écrit (%s sociétés)", len(bilan_results))
+            else:
+                logger.info("Pipeline PDF bilan : aucun PDF bilan trouvé dans le cache")
+        except Exception as exc:
+            logger.warning("Pipeline PDF bilan en échec (non bloquant) : %s", exc, exc_info=True)
+
     answered_global = sum(1 for field_id in global_field_ids if results.get(field_id) is not None)
     answered_person = sum(1 for key in asked_person_keys if results.get(key) is not None)
     answered_company = sum(1 for key in asked_company_keys if results.get(key) is not None)

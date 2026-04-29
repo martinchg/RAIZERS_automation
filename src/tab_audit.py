@@ -269,18 +269,13 @@ def _render_audit_history() -> None:
 class StreamlitLogHandler(logging.Handler):
     """Capture les logs dans un buffer pour affichage Streamlit."""
 
-    def __init__(self, placeholder=None, max_live_lines: int = 80):
+    def __init__(self):
         super().__init__()
         self.buffer = StringIO()
-        self.placeholder = placeholder
-        self.max_live_lines = max_live_lines
 
     def emit(self, record):
         line = self.format(record)
         self.buffer.write(line + "\n")
-        if self.placeholder is not None:
-            lines = self.buffer.getvalue().splitlines()
-            self.placeholder.code("\n".join(lines[-self.max_live_lines:]), language="text")
 
     def get_logs(self) -> str:
         return self.buffer.getvalue()
@@ -490,9 +485,14 @@ def render_audit_tab():
         started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         started_perf = time.perf_counter()
 
+        # Mandats avant extract quand bilan activé (nécessaire pour les SIRENs)
+        mandats_before_extract = run_mandats and run_bilan
+
         execution_plan = [("pipeline", "Pipeline Dropbox")]
+        if mandats_before_extract:
+            execution_plan.append(("mandats", "Mandats Pappers"))
         execution_plan.append(("extract", "Extraction LLM"))
-        if run_mandats:
+        if run_mandats and not mandats_before_extract:
             execution_plan.append(("mandats", "Mandats Pappers"))
         execution_plan.append(("fill", "Generation Excel"))
         if send_email and email_to:
@@ -501,9 +501,7 @@ def render_audit_tab():
         completed_steps = 0
 
         # Setup logging capture
-        live_logs_placeholder = st.empty()
-        live_logs_placeholder.caption("Progression interne du pipeline...")
-        log_handler = StreamlitLogHandler(placeholder=live_logs_placeholder)
+        log_handler = StreamlitLogHandler()
         log_handler.setFormatter(logging.Formatter("%(asctime)s — %(message)s", datefmt="%H:%M:%S"))
         root_logger = logging.getLogger()
         root_logger.addHandler(log_handler)
@@ -540,7 +538,42 @@ def render_audit_tab():
             text=f"Etape {completed_steps}/{total_steps} — Pipeline Dropbox",
         )
 
-        # --- ETAPE 2 : Extraction LLM ---
+        def _run_mandats_step():
+            nonlocal completed_steps
+            progress_bar.progress(
+                completed_steps / total_steps,
+                text=f"Etape {completed_steps + 1}/{total_steps} — Mandats Pappers",
+            )
+            try:
+                status.update(label="Mandats Pappers...")
+                st.write("**Mandats Pappers** en cours...")
+                from mandats_pipeline import run as run_mandats_pipeline
+                run_mandats_pipeline(project_id)
+
+                mandats_path = project_dir / "mandats_results.json"
+                if mandats_path.exists():
+                    data = json.loads(mandats_path.read_text(encoding="utf-8"))
+                    summary = data.get("summary", {})
+                    n_societes = summary.get("societes", 0)
+                    n_persons = summary.get("persons", 0)
+                    results_summary["mandats"] = f"{n_societes} societes, {n_persons} personnes"
+                    st.write(f"Mandats : {n_societes} societes pour {n_persons} personnes")
+                else:
+                    results_summary["mandats"] = "OK"
+            except Exception as e:
+                st.error(f"Mandats : {e}")
+                results_summary["mandats"] = f"ERREUR : {e}"
+            completed_steps += 1
+            progress_bar.progress(
+                completed_steps / total_steps,
+                text=f"Etape {completed_steps}/{total_steps} — Mandats Pappers",
+            )
+
+        # --- ETAPE 2 : Mandats Pappers (si bilan activé, mandats d'abord pour les SIRENs) ---
+        if mandats_before_extract:
+            _run_mandats_step()
+
+        # --- ETAPE suivante : Extraction LLM ---
         progress_bar.progress(
             completed_steps / total_steps,
             text=f"Etape {completed_steps + 1}/{total_steps} — Extraction LLM",
@@ -588,36 +621,9 @@ def render_audit_tab():
             text=f"Etape {completed_steps}/{total_steps} — Extraction LLM",
         )
 
-        # --- ETAPE 3 : Mandats Pappers ---
-        if run_mandats:
-            progress_bar.progress(
-                completed_steps / total_steps,
-                text=f"Etape {completed_steps + 1}/{total_steps} — Mandats Pappers",
-            )
-            try:
-                status.update(label="Mandats Pappers...")
-                st.write("**Mandats Pappers** en cours...")
-                from mandats_pipeline import run as run_mandats_pipeline
-                run_mandats_pipeline(project_id)
-
-                mandats_path = project_dir / "mandats_results.json"
-                if mandats_path.exists():
-                    data = json.loads(mandats_path.read_text(encoding="utf-8"))
-                    summary = data.get("summary", {})
-                    n_societes = summary.get("societes", 0)
-                    n_persons = summary.get("persons", 0)
-                    results_summary["mandats"] = f"{n_societes} societes, {n_persons} personnes"
-                    st.write(f"Mandats : {n_societes} societes pour {n_persons} personnes")
-                else:
-                    results_summary["mandats"] = "OK"
-            except Exception as e:
-                st.error(f"Mandats : {e}")
-                results_summary["mandats"] = f"ERREUR : {e}"
-            completed_steps += 1
-            progress_bar.progress(
-                completed_steps / total_steps,
-                text=f"Etape {completed_steps}/{total_steps} — Mandats Pappers",
-            )
+        # --- Mandats Pappers (si bilan non activé, après extract comme avant) ---
+        if run_mandats and not mandats_before_extract:
+            _run_mandats_step()
 
         # --- ETAPE 4 : Excel ---
         excel_path = None
@@ -638,9 +644,14 @@ def render_audit_tab():
                 person_folder_map = extraction_data.get("person_folders")
                 pappers_mandats = None
                 mandats_path = project_dir / "mandats_results.json"
-                if run_mandats and mandats_path.exists():
+                if mandats_path.exists():
                     mandats_data = json.loads(mandats_path.read_text(encoding="utf-8"))
                     pappers_mandats = mandats_data.get("societes_par_personne")
+
+                bilan_results = None
+                bilan_results_path = project_dir / "bilan_results.json"
+                if run_bilan and bilan_results_path.exists():
+                    bilan_results = json.loads(bilan_results_path.read_text(encoding="utf-8"))
 
                 fields = filter_fields_for_excel_tabs(
                     questions_data["fields"],
@@ -656,6 +667,7 @@ def render_audit_tab():
                     output_dir=project_dir,
                     person_folder_map=person_folder_map,
                     pappers_mandats=pappers_mandats,
+                    bilan_results=bilan_results,
                     include_operation=run_operation,
                     include_patrimoine=run_patrimoine,
                     include_bilan=run_bilan,

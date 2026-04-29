@@ -31,6 +31,7 @@ sys.path.insert(0, str(ROOT_DIR / "src"))
 from core.runtime_config import configure_environment
 from tab_audit import render_audit_tab
 from tab_immo import render_real_estate_tab
+from tab_consolide import render_consolide_tab
 
 configure_environment(ROOT_DIR)
 
@@ -288,10 +289,13 @@ with logo_center:
 st.markdown('</div>', unsafe_allow_html=True)
 
 
-table_audit, table_immo = st.tabs(["Audit", "Comparateur"])
+table_audit, table_immo, table_consolide = st.tabs(["Audit", "Comparateur", "Consolidé"])
 
 with table_audit:
     render_audit_tab()
 
 with table_immo:
     render_real_estate_tab()
+
+with table_consolide:
+    render_consolide_tab()

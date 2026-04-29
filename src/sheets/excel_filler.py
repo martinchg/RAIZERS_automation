@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 
 from openpyxl import Workbook
 
-from sheets.bilan_sheet import _build_bilan_sheet, _build_compte_resultat_sheet
+from sheets.bilan_sheet import _build_bilan_sheet, _build_compte_resultat_sheet, build_bilan_4col_sheets
 from sheets.lots_sheet import build_lots_sheet
 from sheets.mandats_sheet import build_mandats_sheet
 from core.normalization import canonical_name, extract_person_folder
@@ -52,6 +52,7 @@ def fill_excel(
     output_dir: Path,
     person_folder_map: Optional[Dict[str, str]] = None,
     pappers_mandats: Optional[Dict[str, List[dict]]] = None,
+    bilan_results: Optional[List] = None,
     include_operation: bool = True,
     include_patrimoine: bool = True,
     include_bilan: bool = True,
@@ -76,10 +77,8 @@ def fill_excel(
             logger=logger,
             person_folder_map=person_folder_map,
         )
-    if include_bilan:
-        _build_bilan_sheet(wb, results, fields)
-    if include_compte_resultat:
-        _build_compte_resultat_sheet(wb, results)
+    if include_bilan and bilan_results:
+        build_bilan_4col_sheets(wb, bilan_results)
     if include_lots:
         build_lots_sheet(wb, results, fields, logger_=logger)
     build_mandats_sheet(wb, pappers_mandats or {})
@@ -156,6 +155,12 @@ def main() -> None:
         mandats_data = json.loads(mandats_results_path.read_text(encoding="utf-8"))
         pappers_mandats = mandats_data.get("societes_par_personne")
 
+    bilan_results_path = output_dir / "bilan_results.json"
+    bilan_results = None
+    if bilan_results_path.exists():
+        bilan_results = json.loads(bilan_results_path.read_text(encoding="utf-8"))
+        logger.info("bilan_results.json chargé (%s sociétés)", len(bilan_results))
+
     fields = [f for f in questions_data["fields"] if isinstance(f, dict) and f.get("field_id")]
 
     fill_excel(
@@ -164,6 +169,7 @@ def main() -> None:
         output_dir=output_dir,
         person_folder_map=person_folder_map,
         pappers_mandats=pappers_mandats,
+        bilan_results=bilan_results,
     )
 
 

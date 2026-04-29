@@ -73,6 +73,11 @@ NORMALIZED_DIFFICULTE_PUBLICATION_KEYWORDS = [
     for keyword in DIFFICULTE_PUBLICATION_KEYWORDS
 ]
 
+COLLECTIVE_PUBLICATION_TYPES = (
+    "Procédure collective",
+    "Rétablissement professionnel",
+)
+
 
 def _first_prenom(value: str) -> str:
     cleaned = _clean_text(value)
@@ -118,6 +123,89 @@ def _extract_company_publications(company_detail: Optional[dict]) -> List[dict]:
                     return [item for item in items if isinstance(item, dict)]
 
     return []
+
+
+def _extract_judgment_nature(contenu: str) -> Optional[str]:
+    match = re.search(r"^\s*Nature jugement\s*:\s*(.+?)\s*$", str(contenu or ""), re.MULTILINE)
+    if not match:
+        return None
+    return _clean_text(match.group(1))
+
+
+def _format_collective_publication_comment(publication: dict) -> Optional[str]:
+    if not isinstance(publication, dict):
+        return None
+
+    nature_jugement = _extract_judgment_nature(publication.get("contenu") or "")
+    if not nature_jugement:
+        return None
+
+    publication_date = _clean_text(str(publication.get("date") or ""))
+    if not publication_date:
+        return nature_jugement
+
+    return f"{publication_date} - {nature_jugement}"
+
+
+def _run_recherche_publications_collectives(
+    siren: str,
+    page_size: int = 100,
+) -> Tuple[List[str], dict]:
+    siren = _clean_text(str(siren or ""))
+    if len(siren) != 9:
+        return [], {"query_params": {"siren": siren, "type_publication": list(COLLECTIVE_PUBLICATION_TYPES)}, "result_count": 0}
+
+    all_publications: List[dict] = []
+    all_page_metas: List[dict] = []
+
+    for publication_type in COLLECTIVE_PUBLICATION_TYPES:
+        page = 1
+        total = None
+
+        while True:
+            params = {
+                "siren": siren,
+                "type_publication": publication_type,
+                "page": page,
+                "par_page": page_size,
+            }
+            data = _api_get("/recherche-publications", params=params)
+            items = _extract_results_list(data)
+            all_publications.extend(items)
+            total = data.get("total", total)
+            all_page_metas.append({
+                "type_publication": publication_type,
+                "page": data.get("page", page),
+                "result_count": len(items),
+            })
+
+            if not items:
+                break
+
+            if isinstance(total, int) and sum(
+                meta["result_count"]
+                for meta in all_page_metas
+                if meta.get("type_publication") == publication_type
+            ) >= total:
+                break
+
+            page += 1
+
+    comments = [
+        formatted
+        for formatted in (
+            _format_collective_publication_comment(publication)
+            for publication in all_publications
+        )
+        if formatted
+    ]
+
+    return comments, {
+        "query_params": {"siren": siren, "type_publication": list(COLLECTIVE_PUBLICATION_TYPES)},
+        "result_count": len(all_publications),
+        "pages": all_page_metas,
+        "comment_count": len(comments),
+    }
 
 
 def _extract_publication_keyword_matches(text: str) -> List[Tuple[int, str]]:
@@ -528,6 +616,7 @@ def _build_company_row_from_sources(
     company_stub: dict,
     company_detail: Optional[dict],
     dirigeant_item: dict,
+    commentaires: Optional[str] = None,
     publication_difficulte_contenu: Optional[str] = None,
 ) -> dict:
     base = company_detail or {}
@@ -558,7 +647,7 @@ def _build_company_row_from_sources(
         "nb_dirigeants_total": base.get("nb_dirigeants_total") or company_stub.get("nb_dirigeants_total"),
         "role": _extract_role_from_company_stub(company_stub, dirigeant_item),
         "detention": None,
-        "commentaires": None,
+        "commentaires": commentaires,
         "publication_difficulte_contenu": publication_difficulte_contenu,
     }
 
@@ -566,6 +655,7 @@ def _build_company_row_from_sources(
 def _search_companies_for_person(
     person: dict,
     recherche_cache: Optional[Dict[str, Optional[dict]]] = None,
+    publications_cache: Optional[Dict[str, List[str]]] = None,
 ) -> Tuple[List[dict], dict]:
     nom = _clean_text(person.get("nom", ""))
     prenoms = _clean_text(person.get("prenoms", ""))
@@ -615,6 +705,7 @@ def _search_companies_for_person(
             siren = _clean_text(str(company_stub.get("siren") or ""))
             company_detail = None
             siren_meta = None
+            publication_comments: List[str] = []
             if len(siren) == 9:
                 if recherche_cache is not None and siren in recherche_cache:
                     company_detail = recherche_cache[siren]
@@ -636,6 +727,33 @@ def _search_companies_for_person(
                         recherche_cache[siren] = company_detail
                 recherche_by_siren_meta[siren] = siren_meta
 
+                publication_meta = None
+                if publications_cache is not None and siren in publications_cache:
+                    publication_comments = publications_cache[siren]
+                    publication_meta = {
+                        "query_params": {"siren": siren, "type_publication": list(COLLECTIVE_PUBLICATION_TYPES)},
+                        "result_count": len(publication_comments),
+                        "cache_hit": True,
+                        "comment_count": len(publication_comments),
+                    }
+                else:
+                    try:
+                        publication_comments, publication_meta = _run_recherche_publications_collectives(siren)
+                    except Exception as exc:
+                        publication_comments = []
+                        publication_meta = {
+                            "query_params": {"siren": siren, "type_publication": list(COLLECTIVE_PUBLICATION_TYPES)},
+                            "error": str(exc),
+                        }
+                        print(f"[WARN] /recherche-publications error for siren={siren}: {exc}")
+                    if publications_cache is not None:
+                        publications_cache[siren] = publication_comments
+
+                if publication_meta is not None:
+                    siren_meta = dict(siren_meta or {})
+                    siren_meta["procedure_collective_publications"] = publication_meta
+                    recherche_by_siren_meta[siren] = siren_meta
+
             publication_difficulte_contenu = None
             if siren_meta:
                 publication_difficulte_contenu = (
@@ -647,6 +765,7 @@ def _search_companies_for_person(
                     company_stub,
                     company_detail,
                     dirigeant_item,
+                    commentaires="\n".join(publication_comments) or None,
                     publication_difficulte_contenu=publication_difficulte_contenu,
                 )
             )
@@ -685,6 +804,7 @@ def enrich_people(people: List[dict]) -> Tuple[Dict[str, List[dict]], Dict[str, 
     results: Dict[str, List[dict]] = {}
     debug_payload: Dict[str, dict] = {}
     recherche_cache: Dict[str, Optional[dict]] = {}
+    publications_cache: Dict[str, List[str]] = {}
 
     for person in people:
         nom = _clean_text(person.get("nom", ""))
@@ -694,6 +814,7 @@ def enrich_people(people: List[dict]) -> Tuple[Dict[str, List[dict]], Dict[str, 
         companies, person_debug = _search_companies_for_person(
             person,
             recherche_cache=recherche_cache,
+            publications_cache=publications_cache,
         )
         results[display_name] = companies
         debug_payload[display_name] = person_debug

@@ -146,8 +146,7 @@ def build_mandats_sheet(wb: Workbook, pappers_mandats: Dict) -> int:
             if url:
                 cell.hyperlink = url
 
-            commentaires_value = _merge_commentaires(
-                company.get("commentaires"),
+            commentaires_value = company.get("commentaires") or _merge_commentaires(
                 company.get("publication_difficulte_contenu"),
             )
             values = [

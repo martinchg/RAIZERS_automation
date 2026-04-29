@@ -1,6 +1,6 @@
 """Construction des onglets Bilan et Compte de resultat."""
 
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from openpyxl import Workbook
 from openpyxl.styles import Font
@@ -13,6 +13,7 @@ from core.excel_utils import (
     ITALIC_FONT,
     NUMBER_FORMAT_INTEGER,
     RED_FONT,
+    SECTION_FONT,
     THIN_BORDER,
     VALUE_FONT,
     apply_numeric_format,
@@ -359,3 +360,193 @@ def _build_compte_resultat_sheet(wb: Workbook, results: Dict):
                 row += 1
 
     return filled
+
+
+# ── Onglets 4 colonnes (PDF N / PDF N-1 / Pappers N / Pappers N-1) ────────────
+
+def _row_font_4col(label: str) -> Font:
+    import unicodedata
+    nfd = unicodedata.normalize("NFD", label.lower().strip())
+    canon = "".join(c for c in nfd if unicodedata.category(c) != "Mn")
+    if canon.startswith("total") or canon in ("benefice ou perte", "resultat net"):
+        return BOLD_FONT
+    return VALUE_FONT
+
+
+def _fmt_date(d: Optional[str], fallback: str) -> str:
+    if not d:
+        return fallback
+    from datetime import datetime
+    try:
+        return f"Au {datetime.strptime(d, '%Y-%m-%d').strftime('%d/%m/%Y')}"
+    except ValueError:
+        return f"Au {d}"
+
+
+def _write_4col_headers(ws, row: int, dates: Dict[str, Optional[str]]) -> int:
+    headers = [
+        "En €",
+        _fmt_date(dates.get("pdf_n"),     "PDF N"),
+        _fmt_date(dates.get("pdf_n1"),    "PDF N-1"),
+        _fmt_date(dates.get("pappers_n"), "Pappers N"),
+        _fmt_date(dates.get("pappers_n1"), "Pappers N-1"),
+        "Commentaires",
+    ]
+    for offset, header in enumerate(headers, start=2):
+        cell = ws.cell(row=row, column=offset, value=header)
+        cell.font = HEADER_FONT
+        cell.fill = HEADER_FILL
+        cell.alignment = HEADER_ALIGNMENT
+        cell.border = THIN_BORDER
+    return row + 1
+
+
+def _write_4col_rows(ws, row: int, section_rows: List[Dict[str, Any]]) -> int:
+    for data_row in section_rows:
+        label = str(data_row.get("label") or "").strip()
+        if not label:
+            continue
+        is_computed = data_row.get("_computed", False)
+        is_percent = data_row.get("_percent", False)
+        font = ITALIC_FONT if is_computed else _row_font_4col(label)
+        label_cell = ws.cell(row=row, column=2, value=label)
+        label_cell.font = font
+        label_cell.border = THIN_BORDER
+
+        for col, key in ((3, "pdf_n"), (4, "pdf_n1"), (5, "pappers_n"), (6, "pappers_n1")):
+            cell = ws.cell(row=row, column=col)
+            cell.font = font
+            cell.border = THIN_BORDER
+            value = data_row.get(key)
+            number = to_number(value)
+            if number is not None:
+                cell.value = number
+                if is_percent:
+                    cell.number_format = "0.0%"
+                else:
+                    apply_numeric_format(cell, number)
+            elif value is not None:
+                cell.value = format_display_value(value)
+
+        ws.cell(row=row, column=7).border = THIN_BORDER
+        row += 1
+    return row
+
+
+def _enrich_cdr_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Injecte les lignes calculées EBITDA et % CA après les lignes clés du CDR."""
+    def _get(label: str) -> Dict:
+        for r in rows:
+            if r.get("label") == label:
+                return r
+        return {}
+
+    def _add(a, b):
+        if a is None and b is None:
+            return None
+        return (a or 0) + (b or 0)
+
+    def _pct(num, denom):
+        if num is None or not denom:
+            return None
+        return num / denom
+
+    ca = _get("Chiffre d'affaires")
+    rex = _get("Résultat d'exploitation")
+    dotations = _get("Dotations aux amortissements")
+
+    enriched = []
+    for row in rows:
+        enriched.append(row)
+        label = row.get("label", "")
+
+        if label == "Résultat d'exploitation":
+            enriched.append({
+                "label": "EBITDA",
+                "pdf_n":      _add(rex.get("pdf_n"),     dotations.get("pdf_n")),
+                "pdf_n1":     _add(rex.get("pdf_n1"),    dotations.get("pdf_n1")),
+                "pappers_n":  _add(rex.get("pappers_n"), dotations.get("pappers_n")),
+                "pappers_n1": _add(rex.get("pappers_n1"),dotations.get("pappers_n1")),
+                "_computed": True,
+            })
+            enriched.append({
+                "label": "En % du CA",
+                "pdf_n":      _pct(row.get("pdf_n"),     ca.get("pdf_n")),
+                "pdf_n1":     _pct(row.get("pdf_n1"),    ca.get("pdf_n1")),
+                "pappers_n":  _pct(row.get("pappers_n"), ca.get("pappers_n")),
+                "pappers_n1": _pct(row.get("pappers_n1"),ca.get("pappers_n1")),
+                "_computed": True,
+                "_percent": True,
+            })
+
+        elif label == "Résultat net":
+            enriched.append({
+                "label": "En % du CA",
+                "pdf_n":      _pct(row.get("pdf_n"),     ca.get("pdf_n")),
+                "pdf_n1":     _pct(row.get("pdf_n1"),    ca.get("pdf_n1")),
+                "pappers_n":  _pct(row.get("pappers_n"), ca.get("pappers_n")),
+                "pappers_n1": _pct(row.get("pappers_n1"),ca.get("pappers_n1")),
+                "_computed": True,
+                "_percent": True,
+            })
+
+    return enriched
+
+
+def _configure_4col_sheet(ws) -> None:
+    ws.column_dimensions["A"].width = 4
+    ws.column_dimensions["B"].width = 38
+    for col in ("C", "D", "E", "F"):
+        ws.column_dimensions[col].width = 16
+    ws.column_dimensions["G"].width = 28
+
+
+def build_bilan_4col_sheets(wb: Workbook, bilan_results: List[Dict[str, Any]]) -> None:
+    """Construit les onglets Bilan 4col et Compte de résultat 4col.
+
+    Args:
+        bilan_results: liste de résultats du financial_bilan_integrator.run_for_pdf()
+    """
+    if not bilan_results:
+        return
+
+    ws_bilan = wb.create_sheet("Bilan")
+    ws_cr    = wb.create_sheet("Compte de résultat")
+    for ws in (ws_bilan, ws_cr):
+        _configure_4col_sheet(ws)
+
+    bilan_row = 1
+    cr_row = 1
+
+    for i, result in enumerate(bilan_results):
+        company = result.get("company") or f"Société {i + 1}"
+        sections = result.get("sections") or {}
+        dates = result.get("dates") or {}
+
+        if i > 0:
+            bilan_row += 2
+            cr_row += 2
+
+        # — Bilan —
+        title_cell = ws_bilan.cell(row=bilan_row, column=2, value=company)
+        title_cell.font = Font(bold=True, size=13, color="2F5496")
+        bilan_row += 1
+
+        bilan_row = _write_4col_headers(ws_bilan, bilan_row, dates)
+
+        for section_name, section_title in (("actif", "Actif"), ("passif", "Passif")):
+            sect_cell = ws_bilan.cell(row=bilan_row, column=2, value=section_title)
+            sect_cell.font = SECTION_FONT
+            bilan_row += 1
+            bilan_row = _write_4col_rows(ws_bilan, bilan_row, sections.get(section_name) or [])
+            bilan_row += 1
+
+        # — Compte de résultat —
+        cr_title_cell = ws_cr.cell(row=cr_row, column=2, value=company)
+        cr_title_cell.font = Font(bold=True, size=13, color="2F5496")
+        cr_row += 1
+
+        cr_row = _write_4col_headers(ws_cr, cr_row, dates)
+        cdr_rows = _enrich_cdr_rows(sections.get("compte_resultat") or [])
+        cr_row = _write_4col_rows(ws_cr, cr_row, cdr_rows)
+        cr_row += 1

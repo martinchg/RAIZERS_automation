@@ -21,6 +21,36 @@ from typing import Any, Dict, List, Optional, Tuple
 
 SECTION_NAMES = ("actif", "passif", "compte_resultat")
 
+_CDR_CANONICAL_ORDER: Dict[str, int] = {
+    "chiffre d'affaires": 0,
+    "autres produits d'exploitation": 1,
+    "charges d'exploitation": 2,
+    "charges de personnel": 3,
+    "dotations aux amortissements": 4,
+    "résultat d'exploitation": 5,
+    "résultat financier": 6,
+    "résultat exceptionnel": 7,
+    "impôts sur les bénéfices": 8,
+    "résultat net": 9,
+}
+
+
+def _cdr_sort_key(label: str) -> int:
+    return _CDR_CANONICAL_ORDER.get(_normalize(label), 99)
+
+_DEFAULT_CDR_FEATURE_KEYS = [
+    "Chiffre d'affaires",
+    "Autres produits d'exploitation",
+    "Charges d'exploitation",
+    "Charges de personnel",
+    "Dotations aux amortissements",
+    "Résultat d'exploitation",
+    "Résultat financier",
+    "Résultat exceptionnel",
+    "Impôts sur les bénéfices",
+    "Résultat net",
+]
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -74,6 +104,9 @@ def load_feature_keys(revealing_json_path: Path) -> Dict[str, List[str]]:
             if label and label not in labels:
                 labels.append(label)
         result[section] = labels
+
+    result["compte_resultat"] = list(_DEFAULT_CDR_FEATURE_KEYS)
+
     return result
 
 
@@ -105,6 +138,20 @@ def build_mapping_prompt(
             avail_blocks.append(f"{section}: {json.dumps(labels, ensure_ascii=False)}")
     avail_block = "\n".join(avail_blocks)
 
+    free_sections = [s for s in SECTION_NAMES if not (feature_keys.get(s) or [])]
+
+    free_section_rule = ""
+    if free_sections:
+        free_section_rule = (
+            f"\n- Sections libres ({', '.join(free_sections)}) : pas de feature keys Pappers disponibles. "
+            "Pour ces sections, crée toi-même 8 à 12 regroupements révélateurs (libellés lisibles). "
+            "Retourne un dict {{\"libellé\": [source_labels]}} — même format que les sections avec squelette. "
+            "Choisis des libellés clairs (ex. \"Chiffre d'affaires\", \"Résultat net\", \"Charges de personnel\"). "
+            "Un code source ne peut apparaître que dans UN SEUL groupe. "
+            "Utilise le total global seul quand il existe, sinon somme les sous-lignes. "
+            "Si la section est vraiment vide de données → retourne {{}}."
+        )
+
     return f"""Tu reçois l'extraction comptable brute d'un PDF financier.
 
 TON UNIQUE RÔLE : pour chaque feature key du squelette ci-dessous, indiquer quels labels bruts lui correspondent.
@@ -120,8 +167,7 @@ Tu ne calcules AUCUNE somme. Tu n'écris AUCUN chiffre. Tu ne touches à AUCUNE 
 - Travaille section par section : les labels bruts de "actif" n'alimentent que les feature keys de "actif", etc.
 - Si une ligne brute de total correspond directement à une feature key de total → utilise-la seule (pas les sous-lignes en plus).
 - Si tu dois sommer des sous-lignes (pas de sous-total exact disponible), inclus-les toutes : une fois ta liste constituée, relis les labels bruts disponibles pour cette section et demande-toi pour chacun "est-ce que ce label appartient à cette famille ?" — si oui et qu'il n'est pas déjà dans une autre feature key, ajoute-le. Ne l'exclus pas parce que son libellé ressemble à la feature key elle-même (ex. "Emprunts et dettes financières diverses" fait bien partie de "Emprunts et dettes financières").
-- Si aucun label brut ne correspond clairement à une feature key → laisse la liste vide [].
-- Les sections sans feature keys (dict vide {{}}) → laisser {{}}.
+- Si aucun label brut ne correspond clairement à une feature key → laisse la liste vide [].{free_section_rule}
 - INTERDIT : écrire un nombre, inventer un label, modifier une clé du squelette.
 
 ═══ Squelette à compléter (JSON strict, aucun texte autour) ═══
@@ -150,21 +196,26 @@ def resolve_mapping(
         raw_rows = first_pass_payload.get(section) or []
         fk_list = feature_keys.get(section) or []
 
-        # Pas de feature keys → pass-through brut (ex. compte_resultat sans Pappers)
-        if not fk_list:
-            result[section] = [
-                {
-                    "label": str(row.get("l") or "").strip(),
-                    "n":     row.get("n"),
-                    "n1":    row.get("n1"),
-                }
-                for row in raw_rows
-                if str(row.get("l") or "").strip()
-            ]
-            continue
-
         exact, norm = _build_lookup(raw_rows)
         section_mapping: Dict[str, List[str]] = mapping.get(section) or {}
+
+        # Pas de feature keys Pappers → le LLM a créé ses propres regroupements libres.
+        # Si le LLM a renvoyé un dict non vide, on l'utilise comme feature keys ad hoc.
+        # Sinon (LLM aussi vide), pass-through brut en dernier recours.
+        if not fk_list:
+            if section_mapping:
+                fk_list = list(section_mapping.keys())
+            else:
+                result[section] = [
+                    {
+                        "label": str(row.get("l") or "").strip(),
+                        "n":     row.get("n"),
+                        "n1":    row.get("n1"),
+                    }
+                    for row in raw_rows
+                    if str(row.get("l") or "").strip()
+                ]
+                continue
 
         section_result = []
         for fk_label in fk_list:
@@ -184,6 +235,9 @@ def resolve_mapping(
                 "n":     sum(n_vals)  if n_vals  else None,
                 "n1":    sum(n1_vals) if n1_vals else None,
             })
+
+        if section == "compte_resultat":
+            section_result.sort(key=lambda r: _cdr_sort_key(r["label"]))
 
         result[section] = section_result
 
