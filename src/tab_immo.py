@@ -27,6 +27,7 @@ from core.excel_utils import (
     apply_numeric_format,
 )
 from immo_scoring import (
+    ComparableOutlierFilter,
     ComparableScorer,
     PropertyType,
     SubjectProperty,
@@ -193,7 +194,7 @@ def append_comparables_summary_row(
     rows = [dict(row) for row in comparables]
     summary_row = {key: "" for key in rows[0].keys()}
     summary_row["Retenu"] = "Synthèse"
-    summary_row["Adresse"] = "Moyenne de tous les comparables"
+    summary_row["Adresse"] = "Moyenne des comparables retenus"
     summary_row["Prix de vente"] = format_french_number(statistics.get("average_total_price_eur"))
     summary_row["Prix par m²"] = format_french_number(statistics.get("average_price_per_sqm_eur"))
 
@@ -237,6 +238,7 @@ _STATS_LABELS_FR: Dict[str, str] = {
     "api_min_year_used": "Année minimale",
     "comparables_found": "Comparables trouvés",
     "comparables_retained": "Comparables retenus",
+    "comparables_excluded": "Comparables exclus",
     "average_total_price_eur": "Prix de vente moyen (€)",
     "min_price_per_sqm_eur": "Prix/m² minimum (€)",
     "median_price_per_sqm_eur": "Prix/m² médian (€)",
@@ -775,10 +777,17 @@ class DVFClient:
 
 
 class ComparablePipeline:
-    def __init__(self, geocoder: GeocoderClient, dvf_client: DVFClient, scorer: ComparableScorer) -> None:
+    def __init__(
+        self,
+        geocoder: GeocoderClient,
+        dvf_client: DVFClient,
+        scorer: ComparableScorer,
+        outlier_filter: Optional[ComparableOutlierFilter] = None,
+    ) -> None:
         self.geocoder = geocoder
         self.dvf_client = dvf_client
         self.scorer = scorer
+        self.outlier_filter = outlier_filter or ComparableOutlierFilter()
 
     def run(self, payload: ComparableRequest) -> Dict[str, Any]:
         valuation_date = date.today()
@@ -816,45 +825,45 @@ class ComparablePipeline:
                 continue
             normalized_comparables.append(comp)
 
-        deduplicated_comparables = self._deduplicate_recent_same_address_sales(normalized_comparables)
+        comparables = self._mark_recent_same_address_duplicates(normalized_comparables)
 
-        eligible_comparables: List[Dict[str, Any]] = []
-        for comp in deduplicated_comparables:
+        for comp in comparables:
             distance_m = comp.get("distance_m")
             if distance_m is not None and distance_m > payload.search_radius_m:
-                continue
+                comp["included"] = False
+                comp["exclusion_reason"] = "outside_radius"
+            if comp.get("price_per_sqm_eur") is None:
+                comp["included"] = False
+                comp["exclusion_reason"] = "missing_price_per_sqm"
             comp["similarity_score"] = self.scorer.score(
                 subject,
                 comp,
                 reference_date=valuation_date,
             )
-            eligible_comparables.append(comp)
+        self.outlier_filter.apply(subject, comparables)
 
-        eligible_prices = [
-            comp["price_per_sqm_eur"]
-            for comp in eligible_comparables
-            if comp.get("price_per_sqm_eur") is not None
+        sorted_comparables = self._sort_comparables(comparables)
+        retained_comparables = [
+            comp for comp in sorted_comparables
+            if comp.get("included", True)
         ]
-
-        sorted_comparables = self._sort_comparables(eligible_comparables)
-        retained_comparables = self._select_comparables(subject, sorted_comparables)
         retained_ids = {id(comp) for comp in retained_comparables}
-        all_total_prices = [
+        retained_total_prices = [
             comp["total_price_eur"]
-            for comp in sorted_comparables
+            for comp in retained_comparables
             if comp.get("total_price_eur") is not None
         ]
-        all_prices = [
+        retained_prices = [
             comp["price_per_sqm_eur"]
-            for comp in sorted_comparables
+            for comp in retained_comparables
             if comp.get("price_per_sqm_eur") is not None
         ]
         returned_comparables = [
             self._format_comparable_for_display(comp, retained=id(comp) in retained_ids)
             for comp in sorted_comparables
         ]
-        median_price = median(all_prices)
-        price_tranches = compute_price_tranche_averages(all_prices)
+        median_price = median(retained_prices)
+        price_tranches = compute_price_tranche_averages(retained_prices)
 
         return {
             "subject": subject.model_dump(),
@@ -862,13 +871,14 @@ class ComparablePipeline:
             "statistics": {
                 "search_radius_m_used": payload.search_radius_m,
                 "api_min_year_used": payload.api_min_year,
-                "comparables_found": len(eligible_comparables),
+                "comparables_found": len(sorted_comparables),
                 "comparables_retained": len(retained_comparables),
-                "average_total_price_eur": round(sum(all_total_prices) / len(all_total_prices), 2) if all_total_prices else None,
-                "min_price_per_sqm_eur": min(all_prices) if all_prices else None,
+                "comparables_excluded": len(sorted_comparables) - len(retained_comparables),
+                "average_total_price_eur": round(sum(retained_total_prices) / len(retained_total_prices), 2) if retained_total_prices else None,
+                "min_price_per_sqm_eur": min(retained_prices) if retained_prices else None,
                 "median_price_per_sqm_eur": round(median_price, 2) if median_price is not None else None,
-                "max_price_per_sqm_eur": max(all_prices) if all_prices else None,
-                "average_price_per_sqm_eur": round(sum(all_prices) / len(all_prices), 2) if all_prices else None,
+                "max_price_per_sqm_eur": max(retained_prices) if retained_prices else None,
+                "average_price_per_sqm_eur": round(sum(retained_prices) / len(retained_prices), 2) if retained_prices else None,
                 **price_tranches,
             },
         }
@@ -917,6 +927,9 @@ class ComparablePipeline:
             "street_name": street_name,
             "distance_m": round(distance_m, 1) if distance_m is not None else None,
             "similarity_score": None,
+            "included": True,
+            "exclusion_reason": None,
+            "outlier_mad_zscore": None,
             "_micro_location_key": normalize_micro_location(street_name),
             "_latitude": latitude,
             "_longitude": longitude,
@@ -930,9 +943,8 @@ class ComparablePipeline:
         return self._sort_comparables(comparables)[:MAX_RETAINED_COMPARABLES]
 
     @staticmethod
-    def _deduplicate_recent_same_address_sales(comparables: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _mark_recent_same_address_duplicates(comparables: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         kept_by_address: Dict[str, List[date]] = {}
-        deduplicated: List[Dict[str, Any]] = []
 
         comparables_sorted = sorted(
             comparables,
@@ -944,24 +956,25 @@ class ComparablePipeline:
             address = comp.get("address")
             sale_date = comp.get("sale_date")
             if not address or sale_date is None:
-                deduplicated.append(comp)
                 continue
 
             address_key = _normalize_address_text(str(address))
             kept_dates = kept_by_address.setdefault(address_key, [])
             if any(abs((kept_date - sale_date).days) < 365 for kept_date in kept_dates):
+                comp["included"] = False
+                comp["exclusion_reason"] = "duplicate_recent_sale"
                 continue
 
             kept_dates.append(sale_date)
-            deduplicated.append(comp)
 
-        return deduplicated
+        return comparables
 
     @staticmethod
     def _sort_comparables(comparables: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         return sorted(
             comparables,
             key=lambda comp: (
+                0 if comp.get("included", True) else 1,
                 -(comp.get("similarity_score") or 0),
                 -(comp["sale_date"].toordinal() if comp.get("sale_date") else 0),
                 comp.get("distance_m") if comp.get("distance_m") is not None else float("inf"),
@@ -972,6 +985,7 @@ class ComparablePipeline:
         return {
             "Retenu": "Oui" if retained else "Non",
             "Score": format_french_number(comp.get("similarity_score")),
+            "Raison": comp.get("exclusion_reason"),
             "Adresse": comp.get("address"),
             "Type de bien": comp.get("property_label"),
             "Surface habitable": format_french_number(comp.get("living_area_sqm")),

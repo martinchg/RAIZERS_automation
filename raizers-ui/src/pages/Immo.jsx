@@ -281,6 +281,7 @@ export default function Immo() {
                     <tr className="text-xs text-white/35 uppercase tracking-wider border-b border-white/[0.06]">
                       <th className="pb-2 text-left font-medium">Retenu</th>
                       <th className="pb-2 text-right font-medium">Score</th>
+                      <th className="pb-2 text-left font-medium">Raison</th>
                       <th className="pb-2 text-left font-medium">Adresse</th>
                       <th className="pb-2 text-right font-medium">Surface</th>
                       <th className="pb-2 text-right font-medium">Pièces</th>
@@ -298,6 +299,7 @@ export default function Immo() {
                           </span>
                         </td>
                         <td className="py-2.5 text-right text-cyan-300">{row.Score ?? '—'}</td>
+                        <td className="py-2.5 text-left text-white/45">{row.Raison ?? '—'}</td>
                         <td className="py-2.5 text-white/75 max-w-[260px] truncate">{row.Adresse ?? '—'}</td>
                         <td className="py-2.5 text-right text-white/60">{formatNumber(row['Surface habitable'], 'm²')}</td>
                         <td className="py-2.5 text-right text-white/60">{formatNumber(row.Pièces)}</td>
@@ -371,6 +373,7 @@ export default function Immo() {
                 {[
                   { label: 'Comparables trouvés', value: formatNumber(statistics.comparables_found) },
                   { label: 'Comparables retenus', value: formatNumber(statistics.comparables_retained) },
+                  { label: 'Comparables exclus', value: formatNumber(statistics.comparables_excluded) },
                   { label: 'Prix/m² moyen', value: formatNumber(statistics.average_price_per_sqm_eur, '€') },
                   { label: 'Prix/m² médian', value: formatNumber(statistics.median_price_per_sqm_eur, '€') },
                   { label: 'Prix/m² minimum', value: formatNumber(statistics.min_price_per_sqm_eur, '€') },
