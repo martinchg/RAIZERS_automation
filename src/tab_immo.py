@@ -249,7 +249,19 @@ _STATS_LABELS_FR: Dict[str, str] = {
     "average_price_per_sqm_high_band_eur": "Prix/m² moyen tranche haute (€)",
 }
 
-_HIDDEN_COLS = {"_latitude", "_longitude"}
+_HIDDEN_COLS = {"_latitude", "_longitude", "Retenu", "Score", "Raison"}
+
+_STATS_KEEP = {
+    "comparables_retained",
+    "average_total_price_eur",
+    "average_price_per_sqm_eur",
+    "min_price_per_sqm_eur",
+    "median_price_per_sqm_eur",
+    "max_price_per_sqm_eur",
+    "average_price_per_sqm_low_band_eur",
+    "average_price_per_sqm_mid_band_eur",
+    "average_price_per_sqm_high_band_eur",
+}
 
 
 def _build_maps_url(lat: Optional[float], lon: Optional[float], address: Optional[str]) -> Optional[str]:
@@ -262,8 +274,12 @@ def _build_maps_url(lat: Optional[float], lon: Optional[float], address: Optiona
 
 def build_immo_excel_export(result: Dict[str, Any]) -> bytes:
     output = BytesIO()
+    retained_comparables = [
+        row for row in result.get("comparables", [])
+        if row.get("Retenu") == "Oui"
+    ]
     comparables_rows = append_comparables_summary_row(
-        result.get("comparables", []),
+        retained_comparables,
         result.get("statistics", {}),
     )
     statistics = result.get("statistics", {}) or {}
@@ -320,7 +336,9 @@ def build_immo_excel_export(result: Dict[str, Any]) -> bytes:
     label_header.alignment = HEADER_ALIGNMENT
     label_header.border = THIN_BORDER
 
-    for stat_offset, (key, value) in enumerate(statistics.items()):
+    for stat_offset, (key, value) in enumerate(
+        (k, v) for k, v in statistics.items() if k in _STATS_KEEP
+    ):
         stat_row = stats_start_row + 1 + stat_offset
         label_cell = ws.cell(row=stat_row, column=1, value=_STATS_LABELS_FR.get(key, key))
         label_cell.font = VALUE_FONT
@@ -946,9 +964,10 @@ class ComparablePipeline:
     def _mark_recent_same_address_duplicates(comparables: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         kept_by_address: Dict[str, List[date]] = {}
 
+        # Sort by price/m² descending so the highest-priced entry is retained when duplicates exist
         comparables_sorted = sorted(
             comparables,
-            key=lambda comp: comp.get("sale_date") or date.min,
+            key=lambda comp: comp.get("price_per_sqm_eur") or 0,
             reverse=True,
         )
 
@@ -960,7 +979,7 @@ class ComparablePipeline:
 
             address_key = _normalize_address_text(str(address))
             kept_dates = kept_by_address.setdefault(address_key, [])
-            if any(abs((kept_date - sale_date).days) < 365 for kept_date in kept_dates):
+            if any(abs((kept_date - sale_date).days) < 730 for kept_date in kept_dates):
                 comp["included"] = False
                 comp["exclusion_reason"] = "duplicate_recent_sale"
                 continue

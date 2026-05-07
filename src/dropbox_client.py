@@ -8,6 +8,7 @@ Nécessite : pip install dropbox python-dotenv
 
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import List
 
@@ -22,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".xlsx", ".xls", ".html",
                         ".txt", ".md", ".pptx", ".ppt"}
+DEFAULT_DOWNLOAD_WORKERS = max(1, int(os.environ.get("DROPBOX_DOWNLOAD_WORKERS", "6")))
 
 
 def get_client() -> dropbox.Dropbox:
@@ -107,20 +109,46 @@ def download_files(dbx: dropbox.Dropbox,
     """
     local_dir = Path(local_dir)
     local_dir.mkdir(parents=True, exist_ok=True)
-    downloaded: List[Path] = []
 
-    for file_meta in files:
-        # Chemin relatif depuis Dropbox (sans le / initial)
+    def _download_one(file_meta: FileMetadata) -> Path | None:
         relative_path = file_meta.path_display.lstrip("/")
         local_path = local_dir / relative_path
         local_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
-            dbx.files_download_to_file(str(local_path), file_meta.path_lower)
-            downloaded.append(local_path)
+            worker_client = get_client()
+            worker_client.files_download_to_file(str(local_path), file_meta.path_lower)
             logger.info(f"  ✅ {relative_path}")
-        except dropbox.exceptions.ApiError as e:
+            return local_path
+        except Exception as e:
             logger.error(f"  ❌ Échec téléchargement {relative_path}: {e}")
+            return None
+
+    downloaded: List[Path] = []
+    worker_count = min(DEFAULT_DOWNLOAD_WORKERS, max(1, len(files)))
+
+    if worker_count == 1:
+        for file_meta in files:
+            downloaded_path = _download_one(file_meta)
+            if downloaded_path is not None:
+                downloaded.append(downloaded_path)
+    else:
+        logger.info("📦 Téléchargement Dropbox en parallèle (%s workers)", worker_count)
+        try:
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                for downloaded_path in executor.map(_download_one, files):
+                    if downloaded_path is not None:
+                        downloaded.append(downloaded_path)
+        except Exception as exc:
+            logger.warning(
+                "Échec du mode parallèle Dropbox (%s). Repli en séquentiel.",
+                exc,
+            )
+            downloaded = []
+            for file_meta in files:
+                downloaded_path = _download_one(file_meta)
+                if downloaded_path is not None:
+                    downloaded.append(downloaded_path)
 
     logger.info(f"📥 {len(downloaded)}/{len(files)} fichier(s) téléchargé(s)")
     return downloaded
@@ -138,12 +166,38 @@ def sync_folder(dropbox_folder: str,
     return download_files(dbx, files, local_dir)
 
 
+def _cleanup_stale_cache(dropbox_folders: List[str],
+                         remote_files: List[FileMetadata],
+                         local_dir: Path) -> int:
+    remote_paths = {f.path_display.lstrip("/") for f in remote_files}
+    deleted = 0
+    for folder in dropbox_folders:
+        local_root = local_dir / folder.lstrip("/")
+        if not local_root.exists():
+            continue
+        for local_file in local_root.rglob("*"):
+            if not local_file.is_file():
+                continue
+            rel = str(local_file.relative_to(local_dir))
+            if rel not in remote_paths:
+                local_file.unlink()
+                deleted += 1
+                logger.info("  🗑️  Supprimé du cache (absent Dropbox) : %s", rel)
+        for local_subdir in sorted(local_root.rglob("*"), reverse=True):
+            if local_subdir.is_dir() and not any(local_subdir.iterdir()):
+                local_subdir.rmdir()
+    if deleted:
+        logger.info("🧹 %d fichier(s) obsolète(s) supprimé(s) du cache local", deleted)
+    return deleted
+
+
 def sync_folders(dropbox_folders: List[str],
                  local_dir: str | Path = "Dropbox_exctraction",
                  recursive: bool = True,
                  dbx: dropbox.Dropbox | None = None) -> List[Path]:
     """
     Télécharge plusieurs dossiers Dropbox ciblés dans un même cache local.
+    Supprime les fichiers locaux qui n'existent plus dans Dropbox.
     """
     if not dropbox_folders:
         return []
@@ -153,5 +207,7 @@ def sync_folders(dropbox_folders: List[str],
 
     for folder in dropbox_folders:
         all_files.extend(list_files(client, folder, recursive=recursive))
+
+    _cleanup_stale_cache(dropbox_folders, all_files, Path(local_dir))
 
     return download_files(client, all_files, local_dir)

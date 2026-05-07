@@ -1,17 +1,13 @@
 """
-Text_extraction_light.py : Version légère sans GPU.
+ingestion.py : Extraction documentaire locale.
 - HTML  : BeautifulSoup
 - DOCX  : python-docx + fallback XML natif
 - EXCEL : Pandas
-- PDF   : pymupdf4llm  (PyMuPDF natif → markdown propre, pas de modèle ML)
-- AUDIO : Whisper (CPU)
+- PDF   : pymupdf4llm (PyMuPDF natif → markdown propre)
 - TXT / MD : lecture directe
 
-Interface identique à Text_extraction.py :
+Interface :
     extract(file_path) -> Tuple[List[Dict], Dict[str, int]]
-
-Usage dans main.py — remplacer simplement l'import :
-    from Text_extraction_light import extract
 """
 
 import logging
@@ -109,7 +105,7 @@ def _extract_pptx_xml_fallback(file_path: Path) -> List[str]:
 
 
 # ---------------------------------------------------------------------------
-# 1. HTML (BeautifulSoup) — identique à Text_extraction.py
+# 1. HTML (BeautifulSoup)
 # ---------------------------------------------------------------------------
 def extract_html(file_path: Path) -> List[Dict[str, Any]]:
     if BeautifulSoup is None:
@@ -270,7 +266,7 @@ def extract_pptx(file_path: Path) -> List[Dict[str, Any]]:
         return [{"text": final_text, "category": "PPTX", "metadata": {"filename": file_path.name}}]
     return []
 # ---------------------------------------------------------------------------
-# 4. EXCEL (Pandas) — identique à Text_extraction.py
+# 4. EXCEL (Pandas)
 # ---------------------------------------------------------------------------
 def extract_excel(file_path: Path) -> List[Dict[str, Any]]:
     if pd is None:
@@ -294,7 +290,7 @@ def extract_excel(file_path: Path) -> List[Dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# 5. PDF (pymupdf4llm) — version légère, pas de GPU/modèle ML
+# 5. PDF (pymupdf4llm)
 # ---------------------------------------------------------------------------
 def extract_pdf(file_path: Path) -> List[Dict[str, Any]]:
     """
@@ -302,7 +298,6 @@ def extract_pdf(file_path: Path) -> List[Dict[str, Any]]:
     Chaque page devient un élément séparé avec son numéro de page en metadata.
 
     ⚠️  Ne convient pas aux PDFs entièrement scannés (images sans couche texte).
-        Pour ces cas, utiliser Text_extraction.py (Marker avec OCR).
     """
     if pymupdf4llm is None:
         logger.error("❌ pymupdf4llm n'est pas installé. Lancez : pip install pymupdf4llm")
@@ -339,7 +334,7 @@ def extract_pdf(file_path: Path) -> List[Dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# ROUTER — interface identique à Text_extraction.py
+# ROUTER — point d'entrée unique
 # ---------------------------------------------------------------------------
 def extract(file_path: "str | Path", source_path: str = "") -> Tuple[List[Dict], Dict[str, int]]:
     """

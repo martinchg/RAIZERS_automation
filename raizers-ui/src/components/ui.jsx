@@ -80,7 +80,8 @@ export function Btn({ children, onClick, variant = 'primary', disabled = false, 
   const base = `${full ? 'w-full' : ''} py-3 px-5 rounded-xl text-sm font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${className}`
   const variants = {
     primary: 'bg-gradient-to-r from-cyan-700 to-sky-800 text-white hover:from-cyan-600 hover:to-sky-700 hover:-translate-y-px hover:shadow-lg hover:shadow-cyan-900/30 active:translate-y-0',
-    secondary: 'bg-white/5 border border-white/14 text-white hover:bg-white/10',
+    secondary: 'bg-white/[0.04] border border-white/[0.18] text-white/80 hover:bg-white/[0.09] hover:border-white/30 hover:text-white',
+    action: 'bg-sky-500/[0.08] border border-sky-400/[0.22] text-sky-300/90 hover:bg-sky-500/[0.15] hover:border-sky-400/35 hover:text-sky-200',
     ghost: 'text-white/50 hover:text-white hover:bg-white/5',
     danger: 'bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20',
   }
@@ -95,6 +96,7 @@ const statusConfig = {
   idle:    { dot: 'bg-white/20',    text: 'text-white/35',  label: 'En attente' },
   running: { dot: 'bg-amber-400 animate-pulse', text: 'text-amber-400', label: 'En cours...' },
   done:    { dot: 'bg-emerald-400', text: 'text-emerald-400', label: 'Terminé' },
+  cached:  { dot: 'bg-amber-400/60', text: 'text-amber-300/80', label: 'En cache' },
   error:   { dot: 'bg-red-400',     text: 'text-red-400',   label: 'Erreur' },
 }
 

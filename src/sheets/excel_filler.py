@@ -77,11 +77,17 @@ def fill_excel(
             logger=logger,
             person_folder_map=person_folder_map,
         )
-    if include_bilan and bilan_results:
-        build_bilan_4col_sheets(wb, bilan_results)
+    if include_bilan:
+        if bilan_results:
+            build_bilan_4col_sheets(wb, bilan_results)
+        else:
+            _build_bilan_sheet(wb, results, fields)
+            if include_compte_resultat:
+                _build_compte_resultat_sheet(wb, results)
     if include_lots:
         build_lots_sheet(wb, results, fields, logger_=logger)
-    build_mandats_sheet(wb, pappers_mandats or {})
+    if include_patrimoine:
+        build_mandats_sheet(wb, pappers_mandats or {})
 
     if not wb.sheetnames:
         placeholder_ws = wb.create_sheet("Rapport")

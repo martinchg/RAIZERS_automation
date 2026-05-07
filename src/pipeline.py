@@ -12,7 +12,7 @@ import time
 import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 # Permettre l'exécution directe : python src/pipeline.py
 _SRC_DIR = Path(__file__).parent.resolve()
@@ -727,7 +727,34 @@ def _document_time_limit(timeout_seconds: int):
 # Pipeline
 # ---------------------------------------------------------------------------
 
-def run(project_path: str, selected_audit_folder: Optional[str] = None):
+def _emit_progress(
+    progress_callback: Optional[Callable[[dict], None]],
+    *,
+    step_key: str,
+    step_label: str,
+    step_index: int,
+    total_steps: int,
+    detail: Optional[str] = None,
+) -> None:
+    if progress_callback is None:
+        return
+    progress_callback(
+        {
+            "step_key": step_key,
+            "step_label": step_label,
+            "step_index": step_index,
+            "total_steps": total_steps,
+            "detail": detail,
+        }
+    )
+
+
+def run(
+    project_path: str,
+    selected_audit_folder: Optional[str] = None,
+    progress_callback: Optional[Callable[[dict], None]] = None,
+):
+    total_steps = 4
     project_id = slugify(project_path)
     project_out = OUTPUT_DIR / project_id
     project_out.mkdir(parents=True, exist_ok=True)
@@ -740,6 +767,14 @@ def run(project_path: str, selected_audit_folder: Optional[str] = None):
     logger.info("=" * 60)
 
     logger.info("ÉTAPE 1 — Sync Dropbox")
+    _emit_progress(
+        progress_callback,
+        step_key="sync_dropbox",
+        step_label="Synchronisation Dropbox",
+        step_index=1,
+        total_steps=total_steps,
+        detail="Téléchargement des fichiers du projet",
+    )
     dbx = _get_dropbox_client()
     sync_targets, resolved_selected_audit_folder = _resolve_dropbox_sync_targets(
         dbx,
@@ -775,6 +810,14 @@ def run(project_path: str, selected_audit_folder: Optional[str] = None):
     )
     logger.info(f" {len(discovered_files)} fichier(s) trouvé(s)")
 
+    _emit_progress(
+        progress_callback,
+        step_key="scope_files",
+        step_label="Qualification des fichiers",
+        step_index=2,
+        total_steps=total_steps,
+        detail="Filtrage du périmètre audit et opérateur",
+    )
     scoped_files, selected_audit_folder_name = filter_audit_files(
         discovered_files,
         project_local_root,
@@ -801,6 +844,14 @@ def run(project_path: str, selected_audit_folder: Optional[str] = None):
         return
 
     logger.info("ÉTAPE 2 — Extraction + Chunking")
+    _emit_progress(
+        progress_callback,
+        step_key="ingest_chunk",
+        step_label="Ingestion et chunking",
+        step_index=3,
+        total_steps=total_steps,
+        detail=f"{len(all_files)} fichier(s) à traiter",
+    )
     previous_manifest = _load_previous_manifest(project_out)
     previous_file_index = _build_previous_file_index(previous_manifest)
     all_parents = []
@@ -924,6 +975,14 @@ def run(project_path: str, selected_audit_folder: Optional[str] = None):
             warnings_list.append(f"Erreur ({elapsed:.2f}s): {source_path}: {str(e)[:200]}")
 
     logger.info("ÉTAPE 3 — Écriture output")
+    _emit_progress(
+        progress_callback,
+        step_key="index_manifest",
+        step_label="Indexation locale",
+        step_index=4,
+        total_steps=total_steps,
+        detail="Écriture des documents et du manifest",
+    )
     from collections import defaultdict
     parents_by_doc = defaultdict(list)
     for p in all_parents:
@@ -968,6 +1027,7 @@ def run(project_path: str, selected_audit_folder: Optional[str] = None):
     )
     logger.info(f"   Output : {project_out}")
     logger.info("=" * 60)
+    return manifest
 
 
 if __name__ == "__main__":

@@ -21,8 +21,9 @@ from pappers.pappers_enrichment import enrich_people, write_debug_json
 logger = logging.getLogger(__name__)
 
 
-def build_mandats_for_project(project_id: str) -> Tuple[Dict[str, Dict[str, List[dict]]], Dict[str, dict]]:
-    people_by_folder = extract_people_from_project(project_id)
+def build_mandats_for_people(
+    people_by_folder: Dict[str, List[dict]],
+) -> Tuple[Dict[str, Dict[str, List[dict]]], Dict[str, dict]]:
     societes_by_folder: Dict[str, Dict[str, List[dict]]] = {}
     debug_by_folder: Dict[str, dict] = {}
 
@@ -42,11 +43,24 @@ def build_mandats_for_project(project_id: str) -> Tuple[Dict[str, Dict[str, List
     return societes_by_folder, debug_by_folder
 
 
-def run(project_id: str, excel_output: Optional[str] = None) -> Path:
+def build_mandats_for_project(project_id: str) -> Tuple[Dict[str, Dict[str, List[dict]]], Dict[str, dict]]:
+    people_by_folder = extract_people_from_project(project_id)
+    return build_mandats_for_people(people_by_folder)
+
+
+def run(
+    project_id: str,
+    excel_output: Optional[str] = None,
+    people_by_folder: Optional[Dict[str, List[dict]]] = None,
+) -> Path:
     project_dir = OUTPUT_DIR / project_id
     project_dir.mkdir(parents=True, exist_ok=True)
 
-    societes_by_folder, debug_by_folder = build_mandats_for_project(project_id)
+    societes_by_folder, debug_by_folder = (
+        build_mandats_for_people(people_by_folder)
+        if people_by_folder is not None
+        else build_mandats_for_project(project_id)
+    )
 
     total_folders = len(societes_by_folder)
     total_persons = sum(len(people_map) for people_map in societes_by_folder.values())

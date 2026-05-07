@@ -29,6 +29,11 @@ Cela signifie que :
 
 En pratique, l'UI simule aujourd'hui une future integration avec le pipeline Python existant.
 
+Exception deja en place :
+
+- `Immo` appelle deja l'API FastAPI locale
+- un check backend simple est affiche sur l'ecran `Setup`
+
 ## Stack
 
 - React 19
@@ -49,6 +54,18 @@ Puis ouvrir l'URL affichee par Vite, en general :
 
 ```bash
 http://localhost:5173
+```
+
+Si le backend FastAPI tourne ailleurs que `http://127.0.0.1:8000` :
+
+```bash
+VITE_API_BASE_URL=http://127.0.0.1:8000 npm run dev
+```
+
+Ou pour garder des appels relatifs `/api` tout en changeant le proxy Vite :
+
+```bash
+VITE_BACKEND_PROXY_TARGET=http://127.0.0.1:8000 npm run dev
 ```
 
 ## Build production
@@ -111,6 +128,27 @@ L'architecture cible la plus simple est :
 - `raizers-ui` pour le frontend
 - `FastAPI` pour exposer quelques routes backend
 - reutilisation du pipeline Python existant dans le repo principal
+
+## Ordre de migration recommande
+
+1. Stabiliser le contrat frontend/backend.
+   Ajouter un client API React unique, une config d'URL backend, et des checks de sante.
+2. Sortir l'orchestration Python de Streamlit dans des services backend reutilisables.
+   Le but est d'appeler la meme logique depuis Streamlit et FastAPI sans dupliquer les flux.
+3. Brancher `Setup`.
+   Remplacer les listes mockees par les vrais dossiers Dropbox et un endpoint de lancement du pipeline.
+4. Brancher `Operation`.
+   Exposer les resultats d'extraction operation et l'etat d'avancement.
+5. Brancher `Financier`.
+   Ajouter detection des societes/fichiers puis lancement de l'extraction financiere.
+6. Brancher `Patrimoine`.
+   Exposer les personnes detectees, les corrections manuelles, puis l'enrichissement Pappers.
+7. Brancher `Export`.
+   Ajouter une route de generation d'Excel et de recuperation du fichier genere.
+8. Ajouter la gestion des jobs longs.
+   Au minimum un statut polling; idealement une file de jobs ou du background processing.
+9. Basculer progressivement l'usage interne vers React.
+   Streamlit reste disponible tant que tous les ecrans ne sont pas branchés.
 
 Exemples de routes futures :
 

@@ -1,16 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useSession } from '../context/session'
 import { Btn, Card, PageHeader, SectionTitle, Spinner } from '../components/ui'
+import { compareImmo, getImmoDraft, getImmoSuggestions, saveImmoDraft } from '../lib/api'
 
 const PROPERTY_TYPES = [
   { value: 'appartement', label: 'Appartement' },
   { value: 'maison', label: 'Maison' },
 ]
-
-function formatCoord(value) {
-  return typeof value === 'number'
-    ? value.toLocaleString('fr-FR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })
-    : '—'
-}
 
 function formatNumber(value, suffix = '') {
   if (value === null || value === undefined || value === '') return '—'
@@ -19,24 +15,68 @@ function formatNumber(value, suffix = '') {
 }
 
 export default function Immo() {
-  const [addressQuery, setAddressQuery] = useState('')
+  const { session, dispatch } = useSession()
+  const draft = session.immoDraft || {}
+  const [addressQuery, setAddressQuery] = useState(draft.addressQuery ?? '')
   const [suggestions, setSuggestions] = useState([])
-  const [selectedSuggestionId, setSelectedSuggestionId] = useState(null)
-  const [propertyType, setPropertyType] = useState('appartement')
-  const [livingArea, setLivingArea] = useState('80')
-  const [rooms, setRooms] = useState('4')
-  const [landArea, setLandArea] = useState('100')
-  const [searchRadius, setSearchRadius] = useState('225')
-  const [apiMinYear, setApiMinYear] = useState('2024')
+  const [selectedSuggestion, setSelectedSuggestion] = useState(draft.selectedSuggestion ?? null)
+  const [showSuggestions, setShowSuggestions] = useState(false)
+  const [propertyType, setPropertyType] = useState(draft.propertyType ?? 'appartement')
+  const [livingArea, setLivingArea] = useState(draft.livingArea ?? '80')
+  const [rooms, setRooms] = useState(draft.rooms ?? '4')
+  const [landArea, setLandArea] = useState(draft.landArea ?? '100')
+  const [searchRadius, setSearchRadius] = useState(draft.searchRadius ?? '225')
+  const [apiMinYear, setApiMinYear] = useState(draft.apiMinYear ?? '2024')
   const [loading, setLoading] = useState(false)
   const [loadingSuggestions, setLoadingSuggestions] = useState(false)
   const [error, setError] = useState('')
-  const [result, setResult] = useState(null)
+  const [result, setResult] = useState(session.immoResult ?? null)
+  const hydratedRef = useRef(false)
+
+  useEffect(() => {
+    setResult(session.immoResult ?? null)
+  }, [session.immoResult])
+
+  useEffect(() => {
+    if (!session.projectId || hydratedRef.current) return
+    let cancelled = false
+    getImmoDraft(session.projectId).then(saved => {
+      if (cancelled || !saved || Object.keys(saved).length === 0) return
+      hydratedRef.current = true
+      if (saved.addressQuery != null) setAddressQuery(saved.addressQuery)
+      if (saved.selectedSuggestion != null) setSelectedSuggestion(saved.selectedSuggestion)
+      if (saved.propertyType != null) setPropertyType(saved.propertyType)
+      if (saved.livingArea != null) setLivingArea(saved.livingArea)
+      if (saved.rooms != null) setRooms(saved.rooms)
+      if (saved.landArea != null) setLandArea(saved.landArea)
+      if (saved.searchRadius != null) setSearchRadius(saved.searchRadius)
+      if (saved.apiMinYear != null) setApiMinYear(saved.apiMinYear)
+      dispatch({ type: 'SET_IMMO_DRAFT', immoDraft: saved })
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [session.projectId, dispatch])
+
+  useEffect(() => {
+    dispatch({
+      type: 'SET_IMMO_DRAFT',
+      immoDraft: {
+        addressQuery,
+        selectedSuggestion,
+        propertyType,
+        livingArea,
+        rooms,
+        landArea,
+        searchRadius,
+        apiMinYear,
+      },
+    })
+  }, [addressQuery, apiMinYear, dispatch, landArea, livingArea, propertyType, rooms, searchRadius, selectedSuggestion])
 
   useEffect(() => {
     const query = addressQuery.trim()
-    if (query.length < 3) {
+    if (query.length < 1) {
       setSuggestions([])
+      setShowSuggestions(false)
       return undefined
     }
 
@@ -44,14 +84,9 @@ export default function Immo() {
     const timeoutId = setTimeout(async () => {
       try {
         setLoadingSuggestions(true)
-        const response = await fetch(`/api/immo/suggestions?q=${encodeURIComponent(query)}&limit=6`, {
-          signal: controller.signal,
-        })
-        const data = await response.json()
-        if (!response.ok) {
-          throw new Error(data.detail || 'Erreur de suggestions')
-        }
+        const data = await getImmoSuggestions(query, 6, controller.signal)
         setSuggestions(data.items || [])
+        setShowSuggestions(true)
       } catch (err) {
         if (err.name !== 'AbortError') {
           setSuggestions([])
@@ -59,15 +94,13 @@ export default function Immo() {
       } finally {
         setLoadingSuggestions(false)
       }
-    }, 250)
+    }, 120)
 
     return () => {
       controller.abort()
       clearTimeout(timeoutId)
     }
   }, [addressQuery])
-
-  const selectedSuggestion = suggestions.find(item => item.id === selectedSuggestionId) ?? null
 
   async function search() {
     if (!addressQuery.trim() || !livingArea || !rooms) return
@@ -88,22 +121,13 @@ export default function Immo() {
     setResult(null)
 
     try {
-      const response = await fetch('/api/immo/compare', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      })
-      const data = await response.json()
-      if (!response.ok) {
-        throw new Error(
-          Array.isArray(data.detail)
-            ? data.detail.map(item => item.msg).join(', ')
-            : (data.detail || 'Erreur DVF'),
-        )
-      }
+      const data = await compareImmo(payload)
       setResult(data)
+      dispatch({ type: 'SET_IMMO_RESULT', immoResult: data })
+      if (session.projectId) {
+        const draftToSave = { addressQuery, selectedSuggestion, propertyType, livingArea, rooms, landArea, searchRadius, apiMinYear }
+        saveImmoDraft(session.projectId, draftToSave).catch(() => {})
+      }
     } catch (err) {
       setError(err.message || 'Erreur inconnue')
     } finally {
@@ -111,7 +135,6 @@ export default function Immo() {
     }
   }
 
-  const subject = result?.subject ?? null
   const statistics = result?.statistics ?? null
   const comparables = result?.comparables ?? []
 
@@ -120,52 +143,70 @@ export default function Immo() {
       <PageHeader
         title="Comparateur - DVF"
         description="Comparatif DVF avec géolocalisation, rayon de recherche et critères issus de l'outil immo."
+        status={loading ? 'running' : result ? 'done' : 'idle'}
       />
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
-        <div className="space-y-5 xl:col-span-2">
+      <div className="space-y-5">
           <Card>
             <SectionTitle>Bien à comparer</SectionTitle>
             <div className="space-y-4">
               <div>
                 <label className="block text-xs text-white/45 mb-1.5 uppercase tracking-widest font-medium">Adresse</label>
-                <input
-                  value={addressQuery}
-                  onChange={e => {
-                    setAddressQuery(e.target.value)
-                    setSelectedSuggestionId(null)
-                  }}
-                  placeholder="Ex. 13 Rue Victor Hugo"
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-cyan-400/50 transition-colors placeholder:text-white/20"
-                />
-              </div>
-
-              {addressQuery.trim().length >= 3 && (
-                <div>
-                  <label className="block text-xs text-white/45 mb-1.5 uppercase tracking-widest font-medium">Suggestions d'adresses</label>
-                  {loadingSuggestions ? (
-                    <div className="flex items-center gap-2 text-sm text-white/45 px-1 py-2">
-                      <Spinner />
-                      Chargement des suggestions...
+                <div className="relative">
+                  <input
+                    value={addressQuery}
+                    onChange={e => {
+                      setAddressQuery(e.target.value)
+                      setSelectedSuggestion(null)
+                    }}
+                    onFocus={() => {
+                      if (suggestions.length > 0 || loadingSuggestions) {
+                        setShowSuggestions(true)
+                      }
+                    }}
+                    onBlur={() => {
+                      window.setTimeout(() => setShowSuggestions(false), 120)
+                    }}
+                    placeholder="Ex. 13 Rue Victor Hugo"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-cyan-400/50 transition-colors placeholder:text-white/20"
+                  />
+                  {showSuggestions && addressQuery.trim().length >= 1 && (
+                    <div className="absolute z-20 left-0 right-0 top-[calc(100%+0.4rem)] rounded-2xl border border-white/10 bg-[#0b1823] shadow-2xl shadow-black/40 overflow-hidden">
+                      {loadingSuggestions ? (
+                        <div className="flex items-center gap-2 px-4 py-3 text-sm text-white/45">
+                          <Spinner />
+                          Chargement des suggestions...
+                        </div>
+                      ) : suggestions.length > 0 ? (
+                        <div className="max-h-72 overflow-y-auto py-1">
+                          {suggestions.map(item => (
+                            <button
+                              key={item.id}
+                              type="button"
+                              onMouseDown={() => {
+                                setAddressQuery(item.label)
+                                setSelectedSuggestion(item)
+                                setShowSuggestions(false)
+                              }}
+                              className={`w-full text-left px-4 py-3 text-sm transition-colors ${
+                                selectedSuggestion?.id === item.id
+                                  ? 'bg-cyan-400/10 text-cyan-100'
+                                  : 'text-white/85 hover:bg-white/[0.05]'
+                              }`}
+                            >
+                              {item.label}
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="px-4 py-3 text-xs text-white/35">
+                          Aucune suggestion trouvée. Tu peux quand même lancer la recherche avec l'adresse saisie.
+                        </div>
+                      )}
                     </div>
-                  ) : suggestions.length > 0 ? (
-                    <select
-                      value={selectedSuggestionId ?? ''}
-                      onChange={e => setSelectedSuggestionId(e.target.value || null)}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-cyan-400/50 cursor-pointer"
-                    >
-                      <option value="" className="bg-[#0c1e2e]">Choisis une suggestion si besoin</option>
-                      {suggestions.map(item => (
-                        <option key={item.id} value={item.id} className="bg-[#0c1e2e]">
-                          {item.label}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <p className="text-xs text-white/35">Aucune suggestion trouvée. Tu peux quand même lancer la recherche avec l'adresse saisie.</p>
                   )}
                 </div>
-              )}
+              </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -276,36 +317,38 @@ export default function Immo() {
             <Card accent>
               <SectionTitle>Transactions comparables</SectionTitle>
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="w-full min-w-[1120px] text-sm table-auto">
                   <thead>
                     <tr className="text-xs text-white/35 uppercase tracking-wider border-b border-white/[0.06]">
-                      <th className="pb-2 text-left font-medium">Retenu</th>
-                      <th className="pb-2 text-right font-medium">Score</th>
-                      <th className="pb-2 text-left font-medium">Raison</th>
-                      <th className="pb-2 text-left font-medium">Adresse</th>
-                      <th className="pb-2 text-right font-medium">Surface</th>
-                      <th className="pb-2 text-right font-medium">Pièces</th>
-                      <th className="pb-2 text-right font-medium">Distance</th>
-                      <th className="pb-2 text-right font-medium">Prix</th>
-                      <th className="pb-2 text-right font-medium">€/m²</th>
+                      <th className="pb-2 pr-4 text-left font-medium whitespace-nowrap">Retenu</th>
+                      <th className="pb-2 pr-4 text-right font-medium whitespace-nowrap">Score</th>
+                      <th className="pb-2 pr-4 text-left font-medium whitespace-nowrap">Raison</th>
+                      <th className="pb-2 pr-4 text-left font-medium whitespace-nowrap min-w-[320px]">Adresse</th>
+                      <th className="pb-2 pr-4 text-right font-medium whitespace-nowrap">Surface</th>
+                      <th className="pb-2 pr-4 text-right font-medium whitespace-nowrap">Pièces</th>
+                      <th className="pb-2 pr-4 text-right font-medium whitespace-nowrap">Date vente</th>
+                      <th className="pb-2 pr-4 text-right font-medium whitespace-nowrap">Distance</th>
+                      <th className="pb-2 pr-4 text-right font-medium whitespace-nowrap min-w-[120px]">Prix</th>
+                      <th className="pb-2 text-right font-medium whitespace-nowrap min-w-[110px]">€/m²</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/[0.04]">
                     {comparables.map((row, index) => (
                       <tr key={index}>
-                        <td className="py-2.5 text-left">
+                        <td className="py-3 pr-4 text-left whitespace-nowrap align-middle">
                           <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${row.Retenu === 'Oui' ? 'bg-emerald-400/10 text-emerald-300' : 'bg-white/5 text-white/45'}`}>
                             {row.Retenu}
                           </span>
                         </td>
-                        <td className="py-2.5 text-right text-cyan-300">{row.Score ?? '—'}</td>
-                        <td className="py-2.5 text-left text-white/45">{row.Raison ?? '—'}</td>
-                        <td className="py-2.5 text-white/75 max-w-[260px] truncate">{row.Adresse ?? '—'}</td>
-                        <td className="py-2.5 text-right text-white/60">{formatNumber(row['Surface habitable'], 'm²')}</td>
-                        <td className="py-2.5 text-right text-white/60">{formatNumber(row.Pièces)}</td>
-                        <td className="py-2.5 text-right text-white/50">{formatNumber(row['Distance (m)'], 'm')}</td>
-                        <td className="py-2.5 text-right text-white/80">{formatNumber(row['Prix de vente'], '€')}</td>
-                        <td className="py-2.5 text-right text-cyan-300 font-medium">{formatNumber(row['Prix par m²'], '€')}</td>
+                        <td className="py-3 pr-4 text-right text-cyan-300 whitespace-nowrap align-middle">{row.Score ?? '—'}</td>
+                        <td className="py-3 pr-4 text-left text-white/45 whitespace-nowrap align-middle">{row.Raison ?? '—'}</td>
+                        <td className="py-3 pr-4 text-white/75 align-middle">{row.Adresse ?? '—'}</td>
+                        <td className="py-3 pr-4 text-right text-white/60 whitespace-nowrap align-middle">{formatNumber(row['Surface habitable'], 'm²')}</td>
+                        <td className="py-3 pr-4 text-right text-white/60 whitespace-nowrap align-middle">{formatNumber(row.Pièces)}</td>
+                        <td className="py-3 pr-4 text-right text-white/50 whitespace-nowrap align-middle">{row['Date de vente'] ?? '—'}</td>
+                        <td className="py-3 pr-4 text-right text-white/50 whitespace-nowrap align-middle">{formatNumber(row['Distance (m)'], 'm')}</td>
+                        <td className="py-3 pr-4 text-right text-white/80 whitespace-nowrap align-middle">{formatNumber(row['Prix de vente'], '€')}</td>
+                        <td className="py-3 text-right text-cyan-300 font-medium whitespace-nowrap align-middle">{formatNumber(row['Prix par m²'], '€')}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -313,73 +356,14 @@ export default function Immo() {
               </div>
             </Card>
           )}
-        </div>
-
-        <div className="space-y-4 xl:col-span-1">
-          <Card accent className="sticky top-0">
-            <SectionTitle>Bien cible</SectionTitle>
-            {subject ? (
-              <div className="space-y-3 text-sm">
-                <div className="rounded-xl border border-white/8 bg-white/[0.02] px-4 py-3">
-                  <div className="text-xs text-white/35 mb-1">Adresse retenue</div>
-                  <div className="text-white/90 font-medium">{subject.normalized_address}</div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-xl border border-white/8 bg-white/[0.02] px-4 py-3">
-                    <div className="text-xs text-white/35 mb-1">Type</div>
-                    <div className="text-white/85">{subject.property_type}</div>
-                  </div>
-                  <div className="rounded-xl border border-white/8 bg-white/[0.02] px-4 py-3">
-                    <div className="text-xs text-white/35 mb-1">Pièces</div>
-                    <div className="text-white/85">{formatNumber(subject.rooms)}</div>
-                  </div>
-                  <div className="rounded-xl border border-white/8 bg-white/[0.02] px-4 py-3">
-                    <div className="text-xs text-white/35 mb-1">Surface habitable</div>
-                    <div className="text-white/85">{formatNumber(subject.living_area_sqm, 'm²')}</div>
-                  </div>
-                  <div className="rounded-xl border border-white/8 bg-white/[0.02] px-4 py-3">
-                    <div className="text-xs text-white/35 mb-1">Terrain</div>
-                    <div className="text-white/85">{formatNumber(subject.land_area_sqm, 'm²')}</div>
-                  </div>
-                  <div className="rounded-xl border border-white/8 bg-white/[0.02] px-4 py-3">
-                    <div className="text-xs text-white/35 mb-1">Ville</div>
-                    <div className="text-white/85">{subject.city ?? '—'}</div>
-                  </div>
-                  <div className="rounded-xl border border-white/8 bg-white/[0.02] px-4 py-3">
-                    <div className="text-xs text-white/35 mb-1">Code postal</div>
-                    <div className="text-white/85">{subject.postcode ?? '—'}</div>
-                  </div>
-                  <div className="rounded-xl border border-white/8 bg-white/[0.02] px-4 py-3">
-                    <div className="text-xs text-white/35 mb-1">Latitude</div>
-                    <div className="text-white/85">{formatCoord(subject.latitude)}</div>
-                  </div>
-                  <div className="rounded-xl border border-white/8 bg-white/[0.02] px-4 py-3">
-                    <div className="text-xs text-white/35 mb-1">Longitude</div>
-                    <div className="text-white/85">{formatCoord(subject.longitude)}</div>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="rounded-xl border border-white/8 bg-white/[0.02] px-4 py-4 text-sm text-white/45">
-                Le bien cible et sa géolocalisation s'afficheront ici après lancement du comparatif.
-              </div>
-            )}
-          </Card>
-
           <Card accent>
             <SectionTitle>Synthèse DVF</SectionTitle>
             {statistics ? (
-              <div className="grid grid-cols-1 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 {[
-                  { label: 'Comparables trouvés', value: formatNumber(statistics.comparables_found) },
-                  { label: 'Comparables retenus', value: formatNumber(statistics.comparables_retained) },
-                  { label: 'Comparables exclus', value: formatNumber(statistics.comparables_excluded) },
                   { label: 'Prix/m² moyen', value: formatNumber(statistics.average_price_per_sqm_eur, '€') },
-                  { label: 'Prix/m² médian', value: formatNumber(statistics.median_price_per_sqm_eur, '€') },
                   { label: 'Prix/m² minimum', value: formatNumber(statistics.min_price_per_sqm_eur, '€') },
                   { label: 'Prix/m² maximum', value: formatNumber(statistics.max_price_per_sqm_eur, '€') },
-                  { label: 'Rayon utilisé', value: formatNumber(statistics.search_radius_m_used, 'm') },
-                  { label: 'Année min API', value: formatNumber(statistics.api_min_year_used) },
                 ].map(item => (
                   <div key={item.label} className="rounded-xl border border-white/8 bg-white/[0.02] px-4 py-3">
                     <div className="text-xs text-white/35 mb-1">{item.label}</div>
@@ -393,7 +377,6 @@ export default function Immo() {
               </div>
             )}
           </Card>
-        </div>
       </div>
     </div>
   )

@@ -262,6 +262,18 @@ def extract_people_from_project(project_id: str) -> Dict[str, List[dict]]:
     return people_by_folder
 
 
+def save_people_from_project(project_id: str, people_by_folder: Optional[Dict[str, List[dict]]] = None) -> Path:
+    payload = {
+        "project_id": project_id,
+        "people_by_folder": people_by_folder if people_by_folder is not None else extract_people_from_project(project_id),
+    }
+
+    output_path = OUTPUT_DIR / project_id / "people_from_casiers.json"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return output_path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Extraction des personnes depuis les casiers judiciaires")
     parser.add_argument("--project", "-p", required=True, help="project_id")
@@ -270,18 +282,16 @@ def main() -> None:
 
     people_by_folder = extract_people_from_project(args.project)
 
-    payload = {
-        "project_id": args.project,
-        "people_by_folder": people_by_folder,
-    }
-
     if args.output:
         output_path = Path(args.output)
+        payload = {
+            "project_id": args.project,
+            "people_by_folder": people_by_folder,
+        }
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     else:
-        output_path = OUTPUT_DIR / args.project / "people_from_casiers.json"
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        output_path = save_people_from_project(args.project, people_by_folder)
 
     logger.info(f"Résultat écrit : {output_path}")
 

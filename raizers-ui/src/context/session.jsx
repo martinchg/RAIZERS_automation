@@ -4,7 +4,13 @@ const SessionContext = createContext(null)
 
 const initialState = {
   project: null,
+  projectId: null,
+  projectPath: null,
   subfolder: null,
+  projectCatalog: null,
+  lastRefresh: null,
+  immoResult: null,
+  immoDraft: null,
   pipeline: 'idle', // idle | running | done | error
   pipelineStats: null,
   tabs: {
@@ -13,12 +19,37 @@ const initialState = {
     patrimoine: 'idle',
   },
   generated: [],
+  jobIds: { operation: null, financier: null, patrimoine: null },
 }
 
 function reducer(state, action) {
   switch (action.type) {
     case 'SET_PROJECT':
-      return { ...initialState, project: action.project, subfolder: action.subfolder }
+      return {
+        ...initialState,
+        project: action.project,
+        projectId: action.projectId ?? null,
+        projectPath: action.projectPath ?? null,
+        subfolder: action.subfolder,
+        projectCatalog: action.projectCatalog ?? null,
+      }
+    case 'SET_PROJECT_CATALOG':
+      return { ...state, projectCatalog: action.projectCatalog ?? null }
+    case 'SET_LAST_REFRESH':
+      return { ...state, lastRefresh: action.lastRefresh ?? null }
+    case 'SET_IMMO_RESULT':
+      return {
+        ...state,
+        immoResult: action.immoResult ?? null,
+        generated: action.immoResult
+          ? [...new Set([...state.generated, 'immo'])]
+          : state.generated.filter(item => item !== 'immo'),
+      }
+    case 'SET_IMMO_DRAFT':
+      return {
+        ...state,
+        immoDraft: action.immoDraft ?? null,
+      }
     case 'PIPELINE_START':
       return { ...state, pipeline: 'running' }
     case 'PIPELINE_DONE':
@@ -27,10 +58,13 @@ function reducer(state, action) {
       return { ...state, pipeline: 'error' }
     case 'TAB_START':
       return { ...state, tabs: { ...state.tabs, [action.tab]: 'running' } }
+    case 'SET_JOB_ID':
+      return { ...state, jobIds: { ...state.jobIds, [action.tab]: action.jobId } }
     case 'TAB_DONE':
       return {
         ...state,
         tabs: { ...state.tabs, [action.tab]: 'done' },
+        jobIds: { ...state.jobIds, [action.tab]: null },
         generated: [...new Set([...state.generated, action.tab])],
       }
     case 'TAB_ERROR':
